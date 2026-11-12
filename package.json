@@ -1,0 +1,47 @@
+{
+  "name": "agentdesk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A self-hosted AI support agent for your website: a chat widget with live voice calls, running your own tools over MCP.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "npm run build:widget && npm run build:server",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:widget": "node widget/build.mjs",
+    "dev": "node widget/build.mjs && tsx watch src/index.ts",
+    "dev:widget": "node widget/build.mjs --watch",
+    "demo:tools": "tsx examples/demo-tools/server.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p widget",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.102",
+    "@hono/node-server": "^2.1.7",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "ai": "^7.0.170",
+    "hono": "^4.13.18",
+    "jose": "^6.2.17",
+    "postgres": "^4.1.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.7",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "preact": "^11.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

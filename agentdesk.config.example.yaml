@@ -1,0 +1,66 @@
+# agentdesk config. Copy to agentdesk.config.yaml and edit.
+# Secrets never go here: they come from the environment (see .env.example).
+# ${NAME} anywhere below is replaced with the environment variable NAME.
+
+port: 8080
+# Read the visitor's IP from X-Forwarded-For. Only behind your own reverse proxy.
+trustProxy: false
+
+agent:
+  name: Sam
+  model: claude-sonnet-5-5
+  effort: medium
+  # Your instructions for the agent (optional if your MCP server provides them).
+  # prompt: ./prompt.md
+
+# Your tools: any MCP server over Streamable HTTP. Try the demo: npm run demo:tools
+mcp:
+  url: http://localhost:8090/mcp
+  # headers:
+  #   Authorization: Bearer ${MCP_TOKEN}
+  # More instructions from the MCP server, added after agent.prompt.
+  promptResource: demo://instructions
+  # Filled in by agentdesk and hidden from the model: from the visitor's identity
+  # token (toolArgs), else the built-ins `channel` and `conversation_id`, else "".
+  hiddenArgs: [user_token]
+
+web:
+  # Sites that may embed the chat. "*" allows any (fine for local testing only).
+  allowedOrigins: ["http://localhost:8090"]
+  # Your site can log visitors in (adds the "Log in" button and show_login tool).
+  login: true
+  # Links from tools on these hosts are shown under voice replies.
+  linkHosts: [example.com]
+  # Extra rules for the website chat.
+  prompt: |
+    - The customer can also reach us at hello@example.com.
+  widget:
+    title: Demo Shop
+    subtitle: AI assistant · replies instantly
+    greeting: "Hi, I'm Sam from Demo Shop 👋 Ask me about our products or your order."
+    voiceHint: Tap the 🎙 mic to talk instead.
+    launcherLabel: Chat with us
+    teamLabel: Demo Shop team
+    currency: "$"
+    chips:
+      - { id: products, label: "Show products", text: "What do you sell?" }
+      - { id: order, label: "Track my order", text: "Where is my order?" }
+    headerLinks:
+      - { label: "Email us", url: "mailto:hello@example.com", icon: mail }
+    theme:
+      primary: "#0f172a"
+      accent: "#2563eb"
+
+# Live voice calls (Gemini Live). Needs GEMINI_API_KEY. Remove this section for text only.
+voice:
+  model: gemini-3.8-live
+  voice: Kore
+  maxMinutes: 5
+
+limits:
+  messagesPerConversation: { max: 20, perMinutes: 10 }
+  messagesPerIp: { max: 60, perMinutes: 10 }
+  voiceCallsPerConversation: { max: 3, perMinutes: 60 }
+  voiceCallsPerIp: { max: 6, perMinutes: 60 }
+  voiceCallsPerDay: { max: 100, perMinutes: 1440 }
+  voiceToolCallsPerCall: { max: 40, perMinutes: 10 }

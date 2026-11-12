@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo Shop</title>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+      main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+      button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Demo Shop</h1>
+      <p>This page plays your website. The chat button at the bottom right is agentdesk.</p>
+      <p>Logged in: <strong id="who">no (guest)</strong></p>
+      <button id="logout" type="button" hidden>Log out</button>
+    </main>
+
+    <!-- 1. Load the widget from your agentdesk server. data-manual: we call init ourselves. -->
+    <script src="http://localhost:8080/widget.js" data-manual></script>
+    <script>
+      let token = null;
+      const who = document.getElementById('who');
+      const logout = document.getElementById('logout');
+
+      // 2. Your site signs a short-lived identity token for the logged-in visitor (here /demo-login).
+      async function logIn() {
+        if (!confirm('Pretend to log in as the demo customer?')) return false;
+        const res = await fetch('/demo-login', { method: 'POST' });
+        token = (await res.json()).token;
+        who.textContent = 'yes (demo customer)';
+        logout.hidden = false;
+        return true;
+      }
+
+      logout.onclick = () => {
+        token = null;
+        who.textContent = 'no (guest)';
+        logout.hidden = true;
+        AgentDesk.reset(); // a new conversation, so the next person can't read this one
+      };
+
+      // 3. Start the widget with your login hooks.
+      AgentDesk.init({
+        identity: () => token,
+        onLogin: logIn,
+        onEvent: (event, props) => console.log('[agentdesk event]', event, props ?? ''),
+      });
+    </script>
+  </body>
+</html>
