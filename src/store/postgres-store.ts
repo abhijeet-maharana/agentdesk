@@ -43,6 +43,9 @@ export class PostgresStore implements Store {
     await this.sql`
       create index if not exists agentdesk_messages_conversation_idx
         on agentdesk_messages (conversation_id, id desc)`;
+    // Row level security with no policies: only the table's owner (agentdesk) can read it. Harmless on
+    // plain Postgres; on Supabase it keeps chats out of the public REST API.
+    await this.sql`alter table agentdesk_messages enable row level security`;
   }
 
   async add(message: NewMessage): Promise<StoredMessage> {
@@ -67,7 +70,14 @@ export class PostgresStore implements Store {
 
   async conversations(limit: number): Promise<ConversationSummary[]> {
     const rows = await this.sql<
-      { conversation_id: string; channel: string; text: string; created_at: Date; messages: string }[]
+      {
+        conversation_id: string;
+        channel: string;
+        role: Role;
+        text: string;
+        created_at: Date;
+        messages: string;
+      }[]
     >`
       with latest as (
         select conversation_id, max(id) as id, count(*) as messages
@@ -77,13 +87,14 @@ export class PostgresStore implements Store {
         order by max(id) desc
         limit ${limit}
       )
-      select m.conversation_id, m.channel, m.text, m.created_at, latest.messages
+      select m.conversation_id, m.channel, m.role, m.text, m.created_at, latest.messages
       from latest join agentdesk_messages m on m.id = latest.id
       order by m.id desc`;
     return rows.map((r) => ({
       conversationId: r.conversation_id,
       channel: r.channel,
       lastMessage: r.text,
+      lastRole: r.role,
       lastAt: r.created_at.toISOString(),
       messages: Number(r.messages),
     }));

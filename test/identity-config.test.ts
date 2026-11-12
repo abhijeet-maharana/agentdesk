@@ -1,6 +1,6 @@
 import { SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
-import { parseConfig } from '../src/config.js';
+import { parseConfig, readSecrets } from '../src/config.js';
 import { IdentityError, identityNote, verifyIdentity } from '../src/identity.js';
 
 const SECRET = 'test-secret-that-is-long-enough-123';
@@ -63,5 +63,18 @@ describe('parseConfig', () => {
 
   it('explains invalid values', () => {
     expect(() => parseConfig({ mcp: { url: 'not a url' } })).toThrow(/mcp.url/);
+  });
+});
+
+describe('readSecrets', () => {
+  it('prefers AGENTDESK_-prefixed names', () => {
+    const secrets = readSecrets({
+      DATABASE_URL: 'postgres://app',
+      AGENTDESK_DATABASE_URL: 'postgres://chat',
+      ADMIN_TOKEN: 'a',
+    });
+    expect(secrets.databaseUrl).toBe('postgres://chat');
+    expect(secrets.adminToken).toBe('a');
+    expect(secrets.geminiApiKey).toBeUndefined();
   });
 });

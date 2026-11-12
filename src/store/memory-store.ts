@@ -37,6 +37,7 @@ export class MemoryStore implements Store {
         conversationId: row.conversationId,
         channel: row.channel,
         lastMessage: row.text,
+        lastRole: row.role,
         lastAt: row.createdAt,
         messages: (summary?.messages ?? 0) + 1,
       });

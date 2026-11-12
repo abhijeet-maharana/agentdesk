@@ -168,8 +168,12 @@ export function parseConfig(raw: unknown): Config {
   return result.data;
 }
 
+/**
+ * Each secret can also be set as AGENTDESK_<NAME>, which wins: handy when agentdesk shares an
+ * env file with your own app, whose DATABASE_URL may point somewhere else.
+ */
 export function readSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
-  const value = (name: string) => env[name]?.trim() || undefined;
+  const value = (name: string) => env[`AGENTDESK_${name}`]?.trim() || env[name]?.trim() || undefined;
   return {
     databaseUrl: value('DATABASE_URL'),
     geminiApiKey: value('GEMINI_API_KEY'),

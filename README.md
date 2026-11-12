@@ -71,7 +71,7 @@ The demo in [examples/demo-tools/server.ts](examples/demo-tools/server.ts) uses 
 
 Everything non-secret lives in `agentdesk.config.yaml`; [agentdesk.config.example.yaml](agentdesk.config.example.yaml) lists every option with a comment. `${NAME}` in the file is replaced with the environment variable `NAME`.
 
-Secrets come only from the environment ([.env.example](.env.example)):
+Secrets come only from the environment ([.env.example](.env.example)). Each can also be set as `AGENTDESK_<NAME>` (which wins), for when agentdesk shares an env file with your app:
 
 | Variable | Needed for |
 |---|---|

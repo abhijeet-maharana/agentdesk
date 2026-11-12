@@ -53,6 +53,7 @@ export interface ConversationSummary {
   conversationId: string;
   channel: string;
   lastMessage: string;
+  lastRole: Role;
   lastAt: string;
   messages: number;
 }

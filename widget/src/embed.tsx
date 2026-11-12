@@ -143,12 +143,12 @@ function render(): void {
     typeof options.container === 'string'
       ? document.querySelector<HTMLElement>(options.container)
       : options.container;
+  if (page && (!container || !container.contains(page.host))) {
+    page.root.unmount();
+    page.host.remove();
+    page = null;
+  }
   if (container) {
-    if (page && !container.contains(page.host)) {
-      page.root.unmount();
-      page.host.remove();
-      page = null;
-    }
     page ??= createMount(container, false);
     applyTheme(page.host);
     page.root.render(<AgentChat {...props} variant="page" />);
