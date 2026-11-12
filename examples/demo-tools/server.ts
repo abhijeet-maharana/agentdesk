@@ -10,30 +10,23 @@ import { Hono } from 'hono';
 import { SignJWT } from 'jose';
 import { z } from 'zod';
 
+const port = Number(process.env.PORT ?? 8090);
+
 const PRODUCTS = [
-  {
-    id: 'mug-blue',
-    title: 'Ceramic mug',
-    subtitle: 'Blue, 350 ml',
-    price: 12,
-    originalPrice: 15,
-    image: 'https://picsum.photos/seed/mug/200',
-  },
-  {
-    id: 'tote-black',
-    title: 'Canvas tote bag',
-    subtitle: 'Black',
-    price: 18,
-    image: 'https://picsum.photos/seed/tote/200',
-  },
-  {
-    id: 'cap-green',
-    title: 'Cotton cap',
-    subtitle: 'Green, one size',
-    price: 9,
-    image: 'https://picsum.photos/seed/cap/200',
-  },
-];
+  { id: 'mug-blue', title: 'Ceramic mug', subtitle: 'Blue, 350 ml', price: 12, originalPrice: 15 },
+  { id: 'tote-black', title: 'Canvas tote bag', subtitle: 'Black', price: 18 },
+  { id: 'cap-green', title: 'Cotton cap', subtitle: 'Green, one size', price: 9 },
+].map((p) => ({ ...p, image: `http://localhost:${port}/images/${p.id}.svg` }));
+
+// Product pictures, drawn here so the demo needs nothing from the internet.
+const IMAGES: Record<string, string> = {
+  'mug-blue':
+    '<rect width="100" height="100" fill="#dbeafe"/><rect x="26" y="30" width="38" height="44" rx="6" fill="#2563eb"/><path d="M64 40h6a9 9 0 0 1 0 18h-6" fill="none" stroke="#2563eb" stroke-width="6"/>',
+  'tote-black':
+    '<rect width="100" height="100" fill="#e2e8f0"/><path d="M38 42v-8a12 12 0 0 1 24 0v8" fill="none" stroke="#0f172a" stroke-width="4"/><path d="M26 42h48l-5 36H31z" fill="#0f172a"/>',
+  'cap-green':
+    '<rect width="100" height="100" fill="#dcfce7"/><path d="M24 62a26 26 0 0 1 52 0z" fill="#16a34a"/><path d="M50 62h32a4 4 0 0 1 0 8H50z" fill="#15803d"/><circle cx="50" cy="36" r="3" fill="#15803d"/>',
+};
 
 // Orders per user id: the user comes from the hidden `user_token` argument, never from the model.
 const ORDERS: Record<string, Array<{ id: string; item: string; status: string }>> = {
@@ -97,6 +90,13 @@ const handler = createMcpHandler(createServer);
 const app = new Hono();
 app.all('/mcp', (c) => handler.fetch(c.req.raw));
 
+app.get('/images/:file', (c) => {
+  const svg = IMAGES[c.req.param('file').replace(/\.svg$/, '')];
+  if (!svg) return c.notFound();
+  c.header('content-type', 'image/svg+xml');
+  return c.body(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${svg}</svg>`);
+});
+
 // The shop's page, with the chat widget on it.
 const page = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 app.get('/', (c) => c.html(page));
@@ -119,5 +119,4 @@ app.post('/demo-login', async (c) => {
   return c.json({ token });
 });
 
-const port = Number(process.env.PORT ?? 8090);
 serve({ fetch: app.fetch, port }, () => console.log(`Demo shop on http://localhost:${port} (tools at /mcp)`));

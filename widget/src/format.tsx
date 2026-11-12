@@ -1,9 +1,9 @@
 import { Fragment, type ReactNode } from 'react';
 
-// Agent replies use WhatsApp-style formatting: *bold*, bare links, and a line with only
-// "---" to split a reply into separate bubbles.
+// Agent replies use WhatsApp-style formatting: *bold* (or Markdown's **bold**), bare links,
+// and a line with only "---" to split a reply into separate bubbles.
 
-const TOKEN = /(https?:\/\/[^\s<>"]+|\*[^*\n]+\*)/g;
+const TOKEN = /(https?:\/\/[^\s<>"]+|\*\*[^*\n]+\*\*|\*[^*\n]+\*)/g;
 const TRAILING_PUNCTUATION = /[.,!?;:)\]]+$/;
 
 /** Splits a reply into bubbles on "---" lines. */
@@ -14,7 +14,7 @@ export function splitBubbles(text: string): string[] {
     .filter(Boolean);
 }
 
-/** One bubble's text with *bold* and clickable links. Line breaks are kept by CSS (pre-wrap). */
+/** One bubble's text with *bold* / **bold** and clickable links. Line breaks are kept by CSS (pre-wrap). */
 export function formatText(text: string): ReactNode {
   const out: ReactNode[] = [];
   let last = 0;
@@ -24,7 +24,8 @@ export function formatText(text: string): ReactNode {
     if (start > last) out.push(text.slice(last, start));
     const token = match[0];
     if (token.startsWith('*')) {
-      out.push(<strong key={i++}>{token.slice(1, -1)}</strong>);
+      const stars = token.startsWith('**') ? 2 : 1;
+      out.push(<strong key={i++}>{token.slice(stars, -stars)}</strong>);
       last = start + token.length;
       continue;
     }

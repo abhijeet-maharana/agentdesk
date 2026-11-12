@@ -2,6 +2,8 @@
 
 **A self-hosted AI support agent for your website: a chat widget with live voice calls, running your own tools.**
 
+![A visitor asks what the shop sells and gets product cards, asks about an order, logs in, and gets the order status](docs/media/demo.gif)
+
 Add one `<script>` tag to your site and visitors get a chat button. They type, or tap 🎙 and talk, to an AI agent (Claude for text, Gemini Live for voice) that answers from *your* tools: products, orders, bookings, whatever your MCP server exposes. Logged-in visitors get answers about their own account; guests get a "Log in" button when they need one. Your team can read every chat and reply from the admin API.
 
 WhatsApp is next on the roadmap: same agent, same tools, second channel.
@@ -16,12 +18,19 @@ WhatsApp is next on the roadmap: same agent, same tools, second channel.
 - **Your team in the loop.** List chats, read them with every tool call, and reply as a person.
 - **Built for real traffic.** A newer message cancels the running reply, prompt caching across visitors, rate limits per chat, IP and day, error alerts to Slack.
 
+<table>
+  <tr>
+    <td><img src="docs/media/products.png" alt="Product cards from the shop's own tool, under the agent's reply" /></td>
+    <td><img src="docs/media/order.png" alt="After logging in, the agent reads the visitor's own orders" /></td>
+  </tr>
+</table>
+
 ## Quick start (5 minutes, no database)
 
 You need Node 22+ and an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
-git clone https://github.com/<you>/agentdesk && cd agentdesk
+git clone https://github.com/abhijeet-maharana/agentdesk && cd agentdesk
 npm install
 cp agentdesk.config.example.yaml agentdesk.config.yaml
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -114,7 +123,10 @@ npm run dev          # server with reload (builds the widget once)
 npm run dev:widget   # rebuild the widget on change
 npm test             # set TEST_DATABASE_URL to also test the Postgres store
 npm run typecheck && npm run lint
+npm run screenshots  # redraws docs/media (demo shop + a scripted model; needs ffmpeg)
 ```
+
+Pull requests welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

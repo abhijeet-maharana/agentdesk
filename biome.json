@@ -1,7 +1,15 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["src/**", "test/**", "widget/**", "examples/**", "*.json", "!package-lock.json"]
+    "includes": [
+      "src/**",
+      "test/**",
+      "widget/**",
+      "examples/**",
+      "scripts/**",
+      "*.json",
+      "!package-lock.json"
+    ]
   },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 110 },
   "javascript": { "formatter": { "quoteStyle": "single" } },
