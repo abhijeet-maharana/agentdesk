@@ -233,12 +233,23 @@ describe('WhatsApp channel', () => {
     await eventually(() => graph.sent.length === 2);
     expect(graph.sent.map((m) => (m.text as { body: string }).body)).toEqual(['Hi Asha!', 'How can I help?']);
     expect(graph.sent[0]).toMatchObject({ to: PHONE, type: 'text' });
+    await eventually(async () => (await rows()).length === 3);
+    expect((await rows()).slice(1)).toMatchObject([
+      { role: 'assistant', text: 'Hi Asha!', data: { whatsapp: { sent: ['out-1'] } } },
+      { role: 'assistant', text: 'How can I help?', data: { whatsapp: { sent: ['out-2'] } } },
+    ]);
+  });
+
+  it('answers messages your app already stored, without storing them again', async () => {
+    const { whatsappChat, graph, rows, store, key } = setup([text('Hi!')]);
+    // Your app logged the customer's message in the shared table itself.
+    await store.add({ conversationId: key, channel: 'whatsapp', role: 'user', text: 'hello' });
+    expect(
+      await whatsappChat.receive(webhook({ type: 'text', text: { body: 'hello' } }), { stored: true }),
+    ).toBe(1);
+    await eventually(() => graph.sent.length === 1);
     await eventually(async () => (await rows()).length === 2);
-    expect((await rows())[1]).toMatchObject({
-      role: 'assistant',
-      text: 'Hi Asha!\n---\nHow can I help?',
-      data: { whatsapp: { sent: ['out-1', 'out-2'] } },
-    });
+    expect((await rows()).map((r) => r.role)).toEqual(['user', 'assistant']);
   });
 
   it('skips a webhook Meta sends twice', async () => {
@@ -384,26 +395,6 @@ describe('WhatsApp channel', () => {
     expect(graph.sent[0]).toMatchObject({ text: { body: 'Did your sticker activation go well?' } });
     await eventually(async () => (await rows()).length === 1);
     expect((await rows()).map((r) => r.role)).toEqual(['assistant']);
-  });
-
-  it('imports earlier history once, into an empty conversation only', async () => {
-    const { app, rows } = setup([]);
-    const post = (messages: unknown) =>
-      app.request(`/v1/admin/conversations/${whatsappKey(PHONE)}/import`, {
-        method: 'POST',
-        headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
-        body: JSON.stringify({ messages }),
-      });
-    const history = [
-      { role: 'user', text: 'hi', createdAt: '2026-11-10T10:00:00Z' },
-      { role: 'assistant', text: 'Hello!', createdAt: '2026-11-10T10:00:05Z' },
-    ];
-    expect((await post(history)).status).toBe(200);
-    expect((await post(history)).status).toBe(409);
-    expect((await rows()).map((r) => [r.role, r.text, r.createdAt, r.data])).toEqual([
-      ['user', 'hi', '2026-11-10T10:00:00Z', { imported: true }],
-      ['assistant', 'Hello!', '2026-11-10T10:00:05Z', { imported: true }],
-    ]);
   });
 
   it('stays quiet while the team has paused the chat, and answers again after resume', async () => {

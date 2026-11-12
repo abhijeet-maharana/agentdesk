@@ -34,6 +34,7 @@ export async function verifyIdentity(
       algorithms: ['HS256'],
       requiredClaims: ['exp'],
     });
+    if (payload.aud === 'agentdesk-inbox') throw new Error('A staff token is not a visitor identity');
     return claimsSchema.parse(payload);
   } catch {
     throw new IdentityError('Your login has expired. Please refresh the page.');

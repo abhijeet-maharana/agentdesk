@@ -20,9 +20,9 @@ To try a change by hand, run the demo shop and agentdesk side by side (README, "
 | `src/web/` | The website channel: chat, voice calls, rate limits |
 | `src/whatsapp/` | The WhatsApp channel: Meta webhook and sender, voice notes |
 | `src/agent/` | The agent loop, MCP client, tools, prompt |
-| `src/store/` | Chat storage (memory and Postgres) |
+| `src/store/` | Chat storage (memory, and one Postgres table: `chat-table.ts`, [docs/storage.md](docs/storage.md)) |
 | `src/voice/` | Gemini Live tokens |
-| `widget/` | The browser widget (Preact, drawn in a shadow root) |
+| `widget/` | The browser widget, and the team inbox in `widget/src/inbox/` (Preact, drawn in shadow roots) |
 | `examples/demo-tools/` | A pretend shop with an MCP server |
 
 ## Guidelines

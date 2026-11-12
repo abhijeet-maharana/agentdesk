@@ -16,7 +16,7 @@ The same agent answers on WhatsApp too: photos, voice notes, catalog messages an
 - **Logged-in visitors.** Your site signs a short-lived identity token; agentdesk passes per-user values to your tools as hidden arguments the model never sees or sets.
 - **Cards.** A tool can return product (or any) cards: photo, title, price, link.
 - **WhatsApp.** Your Business number through Meta's Cloud API: photos the agent can see, voice notes in and out, cards as catalog messages ([docs/whatsapp.md](docs/whatsapp.md)).
-- **Your team in the loop.** List chats, read them with every tool call, and reply as a person.
+- **An inbox for your team.** Every chat, website and WhatsApp, with every tool call: reply, pause the agent while you talk, star, search. On agentdesk's own `/inbox` page, or inside your admin with one script ([docs/inbox.md](docs/inbox.md)).
 - **Built for real traffic.** A newer message cancels the running reply, prompt caching across visitors, rate limits per chat, IP and day, error alerts to Slack.
 
 <table>
@@ -86,7 +86,7 @@ Secrets come only from the environment ([.env.example](.env.example)). Each can 
 | Variable | Needed for |
 |---|---|
 | `ANTHROPIC_API_KEY` | Typed chat (required) |
-| `DATABASE_URL` | Keeping chats (Postgres). One table, `agentdesk_messages`, created on start |
+| `DATABASE_URL` | Keeping chats (Postgres): one table, one row per message, which your app can share ([docs/storage.md](docs/storage.md)) |
 | `GEMINI_API_KEY` | Voice calls (with a `voice:` section in the config) |
 | `IDENTITY_SECRET` | Logged-in visitors (HS256 identity tokens) |
 | `ADMIN_TOKEN` | The admin API |
@@ -102,18 +102,25 @@ docker compose up -d   # agentdesk + Postgres; reads .env and agentdesk.config.y
 
 Set `retentionDays` in the config to delete old chats daily. Put it behind your reverse proxy with HTTPS (the microphone needs a secure page) and set `trustProxy: true` so rate limits see real IPs. agentdesk keeps live state (running replies, voice calls, rate limits) in memory, so run **one** instance.
 
+## Inbox
+
+Open `/inbox` for your team, or put the same inbox inside your own admin with `inbox.js` and a short-lived staff token ([docs/inbox.md](docs/inbox.md)).
+
+![The team inbox](docs/media/inbox.png)
+
 ## Admin API
 
-`Authorization: Bearer $ADMIN_TOKEN` on every call.
+`Authorization: Bearer $ADMIN_TOKEN` on every call (or a staff token from the inbox, [docs/inbox.md](docs/inbox.md)).
 
 | Call | Does |
 |---|---|
-| `GET /v1/admin/conversations?limit=50` | Latest chats |
+| `GET /v1/admin/conversations?limit=50&search=&starred=true&channel=&before=` | Latest chats, with unread count, star, pause and name |
+| `POST /v1/admin/conversations/:key/read`, `…/star` `{ "starred": true }` | Mark read; star or unstar |
+| `GET /v1/admin/media/:id` | A WhatsApp photo, voice note or file |
 | `GET /v1/admin/conversations/:key` | One chat, with every tool call and its raw result, and `pausedUntil` |
 | `POST /v1/admin/conversations/:key/messages` `{ "text": "..." }` | Reply as your team (shown with `teamLabel`; sent on WhatsApp for `whatsapp:` chats) |
 | `POST /v1/admin/conversations/:key/context` `{ "text": "...", "ref"?: "..." }` | Something your app sent the customer itself; the agent reads it, nothing is sent |
 | `POST /v1/admin/conversations/:key/pause` `{ "hours": 12 }` / `DELETE …/pause` | Your team takes over: the agent stays quiet in that chat (messages are still stored) until then, or until resumed |
-| `POST /v1/admin/conversations/:key/import` `{ "messages": [{ "role", "text", "createdAt" }] }` | Earlier history from your own records, into an empty conversation only (409 otherwise) |
 | `POST /v1/admin/conversations/:key/nudge` `{ "note": "..." }` | The agent writes to a WhatsApp customer now; the note says why and is never sent |
 | `POST /v1/admin/whatsapp/webhook` | Pass on a Meta webhook body your own app received ([docs/whatsapp.md](docs/whatsapp.md)) |
 
@@ -131,7 +138,7 @@ npm run dev          # server with reload (builds the widget once)
 npm run dev:widget   # rebuild the widget on change
 npm test             # set TEST_DATABASE_URL to also test the Postgres store
 npm run typecheck && npm run lint
-npm run screenshots  # redraws docs/media (demo shop + a scripted model; needs ffmpeg)
+npm run screenshots  # redraws docs/media incl. the inbox (demo shop + a scripted model; needs ffmpeg)
 ```
 
 Pull requests welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).

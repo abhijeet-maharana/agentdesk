@@ -1,4 +1,4 @@
-// Makes the README pictures: docs/media/demo.gif, products.png and order.png.
+// Makes the README pictures: docs/media/demo.gif, products.png, order.png and inbox.png.
 // Runs the demo shop (examples/demo-tools) and agentdesk with a scripted model instead of
 // Claude, so no API key is needed and every run shows the same conversation.
 // Run: npm run screenshots (needs ffmpeg for the GIF and `npx playwright install chromium` once).
@@ -15,6 +15,8 @@ import { startAgentdesk } from '../src/start.js';
 const OUT = path.resolve('docs/media');
 const VIDEO_DIR = path.join(OUT, '.video');
 const SHOP = 'http://localhost:8090';
+const AGENTDESK = 'http://localhost:8080';
+const ADMIN_TOKEN = 'screenshot-admin-token';
 const VIEWPORT = { width: 900, height: 720 };
 
 type Step = Awaited<ReturnType<MockLanguageModelV4['doGenerate']>>;
@@ -117,6 +119,19 @@ async function conversation(page: Page): Promise<void> {
   await page.screenshot({ path: path.join(OUT, 'order.png') });
 }
 
+async function inboxShot(page: Page): Promise<void> {
+  await page.goto(`${AGENTDESK}/inbox`);
+  await page.getByLabel('Admin token').fill(ADMIN_TOKEN);
+  await page.getByRole('button', { name: 'Open inbox' }).click();
+  await page
+    .getByRole('button', { name: /Website visitor/ })
+    .first()
+    .click();
+  await page.getByText('You have two orders').waitFor();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: path.join(OUT, 'inbox.png') });
+}
+
 async function main(): Promise<void> {
   execFileSync('node', ['widget/build.mjs'], { stdio: 'inherit' });
   rmSync(VIDEO_DIR, { recursive: true, force: true });
@@ -129,6 +144,8 @@ async function main(): Promise<void> {
   delete process.env.AGENTDESK_DATABASE_URL;
   // Shows the mic button. Nothing calls Gemini: the script never starts a voice call.
   process.env.GEMINI_API_KEY ??= 'not-used';
+  // The team inbox (/inbox) logs in with it.
+  process.env.ADMIN_TOKEN = ADMIN_TOKEN;
 
   const shop = spawn('npx', ['tsx', 'examples/demo-tools/server.ts'], {
     env: { ...process.env, IDENTITY_SECRET: secret, PORT: '8090' },
@@ -150,6 +167,11 @@ async function main(): Promise<void> {
     await conversation(await context.newPage());
     await context.close();
 
+    // The same conversation in the team inbox.
+    const inbox = await browser.newPage({ viewport: { width: 1200, height: 760 }, deviceScaleFactor: 2 });
+    await inboxShot(inbox);
+    await inbox.close();
+
     const video = readdirSync(VIDEO_DIR).find((f) => f.endsWith('.webm'));
     if (!video) throw new Error('No video was recorded');
     execFileSync('ffmpeg', [
@@ -164,7 +186,7 @@ async function main(): Promise<void> {
       '0',
       path.join(OUT, 'demo.gif'),
     ]);
-    console.log(`Wrote ${OUT}/demo.gif, products.png, order.png`);
+    console.log(`Wrote ${OUT}/demo.gif, products.png, order.png, inbox.png`);
   } finally {
     await browser.close();
     await agentdesk.close();

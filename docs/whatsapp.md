@@ -30,7 +30,7 @@ Authorization: Bearer $ADMIN_TOKEN
 <the webhook JSON>
 ```
 
-This is also how you roll out to a few test numbers first.
+Add `?stored=true` when your app already wrote the messages to the shared table ([storage.md](storage.md)), and `?reply=false` to only store them. This is also how you roll out to a few test numbers first.
 
 ## Who the customer is
 
@@ -57,16 +57,9 @@ Authorization: Bearer $ADMIN_TOKEN
 
 Nothing is sent; the agent reads it as a message from the business.
 
-## Moving an existing number
+## Sharing your app's WhatsApp log
 
-When agentdesk takes over a number your app answered before, copy the conversation in first, so the agent knows it:
-
-```
-POST /v1/admin/conversations/whatsapp:<digits>/import
-{ "messages": [{ "role": "user", "text": "hi", "createdAt": "2026-11-10T10:00:00Z" }, …] }
-```
-
-Oldest first, `user` or `assistant`, up to 200. It only goes into an empty conversation (409 otherwise), so calling it on every first contact is safe.
+If your app already logs the number's messages in a table, point `storage.table` at it ([storage.md](storage.md)): agentdesk then reads the whole history, including what your app sent, and writes its replies there too. Relay with `?stored=true` so agentdesk doesn't store a message your app already wrote.
 
 ## Writing first
 

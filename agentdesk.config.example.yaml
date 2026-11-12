@@ -5,6 +5,11 @@
 port: 8080
 # Delete chats older than this many days, once a day. Leave out to keep them forever.
 # retentionDays: 30
+
+# The chat table (with DATABASE_URL). An existing table with the same columns, e.g. your app's
+# own WhatsApp log, is shared as it is (docs/storage.md).
+# storage:
+#   table: agentdesk_chats
 # Read the visitor's IP from X-Forwarded-For. Only behind your own reverse proxy.
 trustProxy: false
 
@@ -58,6 +63,14 @@ voice:
   model: gemini-3.8-live
   voice: Kore
   maxMinutes: 5
+
+# Your team's inbox: /inbox, or inbox.js inside your own admin (docs/inbox.md).
+inbox:
+  # Admin sites that embed inbox.js.
+  allowedOrigins: []
+  # Canned replies in the reply box.
+  quickReplies:
+    - { label: "Thanks", text: "Thanks for your patience! Anything else I can help with?" }
 
 # WhatsApp (Meta Cloud API). Secrets: WHATSAPP_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN.
 # Register https://<your host>/v1/whatsapp/webhook in your Meta app. Guide: docs/whatsapp.md

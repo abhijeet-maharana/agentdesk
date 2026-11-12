@@ -29,6 +29,20 @@ const configSchema = z.object({
   /** Messages older than this many days are deleted once a day. Unset: chats are kept forever. */
   retentionDays: z.number().int().positive().optional(),
 
+  /**
+   * Where chats are kept (with DATABASE_URL): one table, one row per message, with the columns in
+   * docs/storage.md. Created if missing; an existing table with those columns (e.g. your app's own
+   * WhatsApp log) is shared as it is, so your app and agentdesk see the same conversations.
+   */
+  storage: z
+    .object({
+      table: z
+        .string()
+        .regex(/^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/)
+        .default('agentdesk_chats'),
+    })
+    .prefault({}),
+
   agent: z
     .object({
       /** How the agent calls itself, e.g. in the voice greeting. */
@@ -91,6 +105,16 @@ const configSchema = z.object({
           theme: z.record(z.string(), z.string()).default({}),
         })
         .prefault({}),
+    })
+    .prefault({}),
+
+  /** The inbox for your team (/inbox, or inbox.js inside your own admin). */
+  inbox: z
+    .object({
+      /** Your admin sites that embed inbox.js, e.g. https://admin.example.com. */
+      allowedOrigins: z.array(z.string()).default([]),
+      /** Canned replies offered in the reply box. */
+      quickReplies: z.array(z.object({ label: z.string(), text: z.string() })).default([]),
     })
     .prefault({}),
 

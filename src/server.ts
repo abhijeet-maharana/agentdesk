@@ -1,12 +1,15 @@
 import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { type Context, Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
 import type { Config, Secrets } from './config.js';
 import { IdentityError, verifyIdentity } from './identity.js';
+import { INBOX_PAGE } from './inbox-page.js';
 import type { Logger } from './logger.js';
+import { verifyStaff } from './staff.js';
 import type { Store } from './store/store.js';
 import { ChatError, type WebChat } from './web/chat.js';
 import { CHANNEL as WHATSAPP, type WhatsAppChat } from './whatsapp/chat.js';
@@ -32,24 +35,22 @@ const transcriptBody = z.object({
     .max(80),
 });
 const teamReplyBody = z.object({ text: z.string().trim().min(1).max(4000) });
-const importBody = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant']),
-        text: z.string().trim().min(1).max(4000),
-        createdAt: z.string().datetime({ offset: true }),
-      }),
-    )
-    .min(1)
-    .max(200),
-});
 const pauseBody = z.object({
   hours: z
     .number()
     .positive()
     .max(24 * 30),
 });
+const listQuery = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(500).default(50),
+    before: z.string().datetime({ offset: true }).optional(),
+    search: z.string().trim().min(1).max(100).optional(),
+    starred: z.enum(['true', 'false']).optional(),
+    channel: z.string().max(20).optional(),
+  })
+  .transform(({ starred, ...q }) => ({ ...q, starredOnly: starred === 'true' }));
+const starBody = z.object({ starred: z.boolean() });
 const nudgeBody = z.object({ note: z.string().trim().min(1).max(2000) });
 const contextBody = z.object({
   text: z.string().trim().min(1).max(4000),
@@ -84,14 +85,24 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.get('/healthz', (c) => c.json({ ok: true }));
 
-  let widget: string | null = null;
-  app.get('/widget.js', async (c) => {
-    widget ??= await readFile(deps.widgetPath, 'utf8').catch(() => null);
-    if (!widget) return c.text('// widget not built: run npm run build:widget', 404);
+  // The bundles: widget.js for your site's visitors, inbox.js for your team (built next to each other).
+  const bundles = new Map<string, string | null>();
+  const serveBundle = (file: string) => async (c: Context) => {
+    if (!bundles.get(file)) {
+      bundles.set(
+        file,
+        await readFile(path.join(path.dirname(deps.widgetPath), file), 'utf8').catch(() => null),
+      );
+    }
+    const body = bundles.get(file);
+    if (!body) return c.text(`// ${file} not built: run npm run build:widget`, 404);
     c.header('content-type', 'application/javascript; charset=utf-8');
     c.header('cache-control', 'public, max-age=300');
-    return c.body(widget);
-  });
+    return c.body(body);
+  };
+  app.get('/widget.js', serveBundle('widget.js'));
+  app.get('/inbox.js', serveBundle('inbox.js'));
+  app.get('/inbox', (c) => c.html(INBOX_PAGE));
 
   // ── Widget API (called from your site's pages) ─────────────────────────────
   const origins = config.web.allowedOrigins;
@@ -177,18 +188,60 @@ export function createApp(deps: ServerDeps): Hono {
     });
   }
 
-  // ── Admin API (your team; Authorization: Bearer ADMIN_TOKEN) ─────────────
+  // ── Admin API (your team: Bearer ADMIN_TOKEN from your server, or a staff token in the inbox) ──
+  const inboxOrigins = config.inbox.allowedOrigins;
+  app.use(
+    '/v1/admin/*',
+    cors({
+      origin: (origin) => (inboxOrigins.includes(origin) ? origin : null),
+      allowMethods: ['GET', 'POST', 'DELETE'],
+      allowHeaders: ['content-type', 'authorization'],
+      maxAge: 600,
+    }),
+  );
   app.use('/v1/admin/*', async (c, next) => {
     const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? '';
-    if (!secrets.adminToken || !safeEqual(token, secrets.adminToken)) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
+    if (secrets.adminToken && safeEqual(token, secrets.adminToken)) return next();
+    const staff = await verifyStaff(token, secrets.identitySecret);
+    if (!staff) return c.json({ error: 'Unauthorized' }, 401);
+    if (staff.role === 'viewer' && c.req.method !== 'GET') return c.json({ error: 'Read-only access' }, 403);
     await next();
   });
 
+  /** What the inbox needs to draw itself. */
+  app.get('/v1/admin/inbox-config', (c) =>
+    c.json({
+      title: config.web.widget.title,
+      teamLabel: config.web.widget.teamLabel,
+      currency: config.web.widget.currency,
+      quickReplies: config.inbox.quickReplies,
+      channels: ['web', ...(whatsapp ? ['whatsapp'] : [])],
+    }),
+  );
+
   app.get('/v1/admin/conversations', async (c) => {
-    const limit = z.coerce.number().int().min(1).max(500).default(50).parse(c.req.query('limit'));
-    return c.json({ conversations: await store.conversations(limit) });
+    const query = listQuery.parse(c.req.query());
+    return c.json({ conversations: await store.conversations(query) });
+  });
+
+  app.post('/v1/admin/conversations/:key/read', async (c) => {
+    await store.markRead(c.req.param('key'));
+    return c.json({ ok: true });
+  });
+
+  app.post('/v1/admin/conversations/:key/star', async (c) => {
+    const { starred } = starBody.parse(await c.req.json());
+    await store.setStarred(c.req.param('key'), starred);
+    return c.json({ starred });
+  });
+
+  /** A photo, voice note or file from a WhatsApp chat (customer's or a voice reply). */
+  app.get('/v1/admin/media/:id', async (c) => {
+    if (!whatsapp) throw new ChatError(404, 'WhatsApp is not configured.');
+    const { data, mimeType } = await whatsapp.media(c.req.param('id'));
+    c.header('content-type', mimeType);
+    c.header('cache-control', 'private, max-age=3600');
+    return c.body(Buffer.from(data));
   });
 
   app.get('/v1/admin/conversations/:key', async (c) => {
@@ -226,32 +279,6 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ message });
   });
 
-  /**
-   * Earlier messages from your own records (e.g. before agentdesk answered this number), oldest
-   * first, so the agent knows the conversation. Only into an empty conversation: a second
-   * import gets 409, so calling it on every first contact is safe.
-   */
-  app.post('/v1/admin/conversations/:key/import', async (c) => {
-    const { messages } = importBody.parse(await c.req.json());
-    const key = c.req.param('key');
-    if ((await store.recent(key, 1, { includeTools: true })).length > 0) {
-      throw new ChatError(409, 'This conversation already has messages.');
-    }
-    const channel = key.split(':')[0] ?? '';
-    // One at a time, so the rows keep their order.
-    for (const m of messages) {
-      await store.add({
-        conversationId: key,
-        channel,
-        role: m.role,
-        text: m.text,
-        data: { imported: true },
-        createdAt: m.createdAt,
-      });
-    }
-    return c.json({ imported: messages.length });
-  });
-
   /** Your team takes over: the agent stays quiet in this chat for `hours` (messages are still stored). */
   app.post('/v1/admin/conversations/:key/pause', async (c) => {
     const { hours } = pauseBody.parse(await c.req.json());
@@ -281,10 +308,14 @@ export function createApp(deps: ServerDeps): Hono {
   /**
    * For an app that keeps its own Meta webhook: it checks Meta's signature itself and passes
    * on the webhook body (all of it, or only the customers agentdesk should answer).
+   * `?reply=false` stores the messages without answering; `?stored=true` answers messages your app
+   * already wrote to the shared chat table (storage.table).
    */
   app.post('/v1/admin/whatsapp/webhook', async (c) => {
     if (!whatsapp) throw new ChatError(404, 'WhatsApp is not configured.');
-    return c.json({ received: await whatsapp.receive(await c.req.json()) });
+    const reply = c.req.query('reply') !== 'false';
+    const stored = c.req.query('stored') === 'true';
+    return c.json({ received: await whatsapp.receive(await c.req.json(), { reply, stored }) });
   });
 
   return app;

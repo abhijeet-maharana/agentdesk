@@ -8,7 +8,13 @@ import type { Config, Secrets } from '../config.js';
 import { type Identity, verifyIdentity } from '../identity.js';
 import type { Alert, Logger } from '../logger.js';
 import type { ChatState } from '../state.js';
-import type { Card, Store, StoredMessage } from '../store/store.js';
+import {
+  type Card,
+  DuplicateMessageError,
+  type MessageData,
+  type Store,
+  type StoredMessage,
+} from '../store/store.js';
 import type { Audio } from './audio.js';
 import type { MetaClient } from './meta.js';
 import { type InboundMessage, isUserId, parseWebhook } from './parse.js';
@@ -61,23 +67,38 @@ export class WhatsAppChat {
     return settings;
   }
 
-  /** Handles one webhook body. Returns how many new customer messages it had. */
-  async receive(payload: unknown): Promise<number> {
+  /**
+   * Handles one webhook body. Returns how many new customer messages it had.
+   * - `reply: false`: store only (e.g. while your app has its AI switched off).
+   * - `stored: true`: your app already wrote them to the shared chat table; just answer.
+   */
+  async receive(
+    payload: unknown,
+    { reply = true, stored = false }: { reply?: boolean; stored?: boolean } = {},
+  ): Promise<number> {
     const latest = new Map<string, InboundMessage>();
     for (const message of parseWebhook(payload)) {
       if (this.isDuplicate(message.id)) continue;
-      const { id, type, name, media } = message;
-      await this.deps.store.add({
-        conversationId: whatsappKey(message.from),
-        channel: CHANNEL,
-        role: 'user',
-        text: message.text,
-        data: { whatsapp: { id, type, ...(name ? { name } : {}), ...(media ? { media } : {}) } },
-      });
+      if (!stored) {
+        const { id, type, name, media } = message;
+        try {
+          await this.deps.store.add({
+            conversationId: whatsappKey(message.from),
+            channel: CHANNEL,
+            role: 'user',
+            text: message.text,
+            data: { whatsapp: { id, type, ...(name ? { name } : {}), ...(media ? { media } : {}) } },
+          });
+        } catch (error) {
+          if (error instanceof DuplicateMessageError) continue; // Meta sent it again
+          throw error;
+        }
+      }
       latest.set(message.from, message);
     }
 
     for (const [phone, message] of latest) {
+      if (!reply) break;
       const key = whatsappKey(phone);
       // Your team took over this chat: stored above, the agent stays quiet.
       if (await this.deps.store.pausedUntil(key)) continue;
@@ -91,6 +112,11 @@ export class WhatsAppChat {
       );
     }
     return latest.size;
+  }
+
+  /** A media file from this number's chats, for the inbox (Meta keeps them for about 30 days). */
+  media(mediaId: string): Promise<{ data: Uint8Array; mimeType: string }> {
+    return this.deps.meta.downloadMedia(mediaId);
   }
 
   /** A message from your team (admin API): sent on WhatsApp, then stored. */
@@ -165,7 +191,10 @@ export class WhatsAppChat {
     }
   }
 
-  /** Sends the reply (text bubbles, maybe a voice note, then cards) and stores it. */
+  /**
+   * Sends the reply (text bubbles, maybe a voice note, then cards), storing each message as it
+   * goes, so the chat shows exactly what the customer got.
+   */
   private async send(
     phone: string,
     reply: NonNullable<Answer>,
@@ -175,44 +204,52 @@ export class WhatsAppChat {
     const { meta, audio, alert } = this.deps;
     const bubbles = splitBubbles(reply.text);
     const cards = reply.attachments.cards ?? [];
-    const sent: string[] = [];
-    let spoken: { id: string; mimeType: string } | undefined;
-    let error: string | undefined;
+    const store = (text: string, data: MessageData) =>
+      this.deps.store.add({
+        conversationId: whatsappKey(phone),
+        channel: CHANNEL,
+        role: 'assistant',
+        text,
+        data,
+      });
 
-    try {
-      for (const [i, bubble] of bubbles.entries()) {
-        if (isCancelled()) break;
-        if (i > 0) await this.sleep(BUBBLE_GAP_MS);
+    for (const [i, bubble] of bubbles.entries()) {
+      if (isCancelled()) return;
+      if (i > 0) await this.sleep(BUBBLE_GAP_MS);
+      try {
         if (i === 0 && audio?.canSpeak && this.wantsVoice(customerRow)) {
           try {
             const voice = await meta.sendVoice(phone, await audio.speak(bubble));
-            sent.push(voice.messageId);
-            spoken = { id: voice.mediaId, mimeType: 'audio/ogg' };
+            await store(bubble, {
+              voice: true,
+              whatsapp: {
+                type: 'audio',
+                sent: [voice.messageId],
+                media: { id: voice.mediaId, mimeType: 'audio/ogg' },
+              },
+            });
             if (!new RegExp(this.settings.audio?.alsoAsTextPattern ?? 'https?://', 'i').test(bubble))
               continue;
           } catch (voiceError) {
             alert('whatsapp-voice', `Voice reply failed for ${phone}, sent as text: ${String(voiceError)}`);
           }
         }
-        sent.push(await meta.sendText(phone, bubble));
+        await store(bubble, { whatsapp: { sent: [await meta.sendText(phone, bubble)] } });
+      } catch (sendError) {
+        alert('whatsapp-send', `Sending to ${phone} failed: ${String(sendError)}`);
+        await store(bubbles.slice(i).join('\n---\n'), { whatsapp: { error: String(sendError) } });
+        return;
       }
-      if (cards.length && !isCancelled()) sent.push(...(await this.sendCards(phone, cards)));
-    } catch (sendError) {
-      error = String(sendError);
-      alert('whatsapp-send', `Sending to ${phone} failed: ${error}`);
     }
 
-    await this.deps.store.add({
-      conversationId: whatsappKey(phone),
-      channel: CHANNEL,
-      role: 'assistant',
-      text: reply.text,
-      data: {
-        ...(cards.length ? { cards } : {}),
-        ...(spoken ? { voice: true } : {}),
-        whatsapp: { sent, ...(spoken ? { media: spoken } : {}), ...(error ? { error } : {}) },
-      },
-    });
+    if (cards.length && !isCancelled()) {
+      try {
+        const sent = await this.sendCards(phone, cards);
+        await store(`[Products: ${cards.map((c) => c.title).join(', ')}]`, { cards, whatsapp: { sent } });
+      } catch (sendError) {
+        alert('whatsapp-send', `Sending cards to ${phone} failed: ${String(sendError)}`);
+      }
+    }
   }
 
   /** Cards as a catalog message when `whatsapp.catalog` is set, else as photos with a caption and link. */

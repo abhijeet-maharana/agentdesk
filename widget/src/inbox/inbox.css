@@ -1,0 +1,541 @@
+/* agentdesk inbox. Every colour is a variable, so a host can match its admin:
+   AgentDeskInbox.mount(el, { theme: { bg: '#0b1220', text: '#e2e8f0', … } }) */
+:host {
+  --ib-bg: #ffffff;
+  --ib-surface: #f4f6f9;
+  --ib-border: #e2e8f0;
+  --ib-text: #0f172a;
+  --ib-muted: #64748b;
+  --ib-primary: #0f172a;
+  --ib-accent: #2563eb;
+  --ib-on-accent: #ffffff;
+  --ib-customer: #ffffff;
+  --ib-ai: #e0e7ff;
+  --ib-team: #dcfce7;
+  --ib-system: #f1f5f9;
+  --ib-warn: #b45309;
+  --ib-error: #b91c1c;
+  --ib-ok: #047857;
+  --ib-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ib-height: 100%;
+  display: block;
+  height: var(--ib-height);
+  container-type: inline-size;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.ib {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  /* One row exactly as tall as the inbox, so the message list scrolls instead of growing. */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 420px;
+  font-family: var(--ib-font);
+  font-size: 14px;
+  color: var(--ib-text);
+  background: var(--ib-bg);
+  border: 1px solid var(--ib-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ib--panel {
+  grid-template-columns: minmax(260px, 320px) 1fr minmax(240px, 300px);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* ── List ─────────────────────────────────────────────── */
+.ib-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--ib-border);
+  background: var(--ib-surface);
+}
+
+.ib-list-head {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid var(--ib-border);
+}
+
+.ib-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ib-search,
+.ib-input {
+  width: 100%;
+  font: inherit;
+  color: var(--ib-text);
+  background: var(--ib-bg);
+  border: 1px solid var(--ib-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.ib-search:focus-visible,
+.ib-input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--ib-accent);
+  outline-offset: 1px;
+}
+
+.ib-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ib-filters {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ib-filter,
+.ib-chip {
+  border: 1px solid var(--ib-border);
+  background: var(--ib-bg);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ib-filter--on {
+  background: var(--ib-accent);
+  border-color: var(--ib-accent);
+  color: var(--ib-on-accent);
+}
+
+.ib-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ib-item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--ib-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ib-item:hover {
+  background: var(--ib-bg);
+}
+
+.ib-item--active {
+  background: var(--ib-bg);
+  box-shadow: inset 3px 0 0 var(--ib-accent);
+}
+
+.ib-avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ib-on-accent);
+  background: var(--ib-primary);
+}
+
+.ib-avatar--whatsapp {
+  background: #128c7e;
+}
+
+.ib-item-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ib-item-top,
+.ib-item-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ib-item-name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ib-item-time {
+  font-size: 11px;
+  color: var(--ib-muted);
+  flex: none;
+}
+
+.ib-item-preview {
+  flex: 1;
+  font-size: 12px;
+  color: var(--ib-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ib-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ib-accent);
+  color: var(--ib-on-accent);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.ib-star {
+  color: #f59e0b;
+}
+
+.ib-paused {
+  color: var(--ib-warn);
+  font-size: 12px;
+}
+
+.ib-more {
+  margin: 8px 12px 12px;
+  padding: 8px;
+  border: 1px solid var(--ib-border);
+  border-radius: 8px;
+  background: var(--ib-bg);
+  cursor: pointer;
+}
+
+.ib-empty {
+  color: var(--ib-muted);
+  text-align: center;
+  padding: 24px 12px;
+  margin: 0;
+}
+
+.ib-empty--thread {
+  margin: auto;
+}
+
+.ib-error,
+.ib-msg-error {
+  color: var(--ib-error);
+  font-size: 12px;
+  margin: 6px 12px;
+}
+
+/* ── Thread ───────────────────────────────────────────── */
+.ib-thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ib-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ib-border);
+  flex-wrap: wrap;
+}
+
+.ib-back {
+  display: none;
+  border: 0;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.ib-head-who {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ib-head-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.ib-head-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ib-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ib-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.ib-pill--ok {
+  color: var(--ib-ok);
+}
+
+.ib-pill--off {
+  color: var(--ib-error);
+}
+
+.ib-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ib-btn {
+  border: 1px solid var(--ib-border);
+  background: var(--ib-bg);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ib-btn:disabled,
+.ib-send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ib-btn--warn {
+  color: var(--ib-warn);
+  border-color: currentColor;
+}
+
+.ib-btn--icon {
+  font-size: 15px;
+  line-height: 1;
+  color: #f59e0b;
+}
+
+.ib-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--ib-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ib-event {
+  align-self: center;
+  font-size: 11px;
+  color: var(--ib-warn);
+  margin: 4px 0;
+}
+
+.ib-day {
+  align-self: center;
+  font-size: 11px;
+  color: var(--ib-muted);
+  margin: 8px 0 2px;
+}
+
+.ib-msg {
+  display: flex;
+}
+
+.ib-msg--ai,
+.ib-msg--team,
+.ib-msg--system {
+  justify-content: flex-end;
+}
+
+.ib-bubble {
+  max-width: min(78%, 560px);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--ib-border);
+  background: var(--ib-customer);
+}
+
+.ib-msg--ai .ib-bubble {
+  background: var(--ib-ai);
+}
+
+.ib-msg--team .ib-bubble {
+  background: var(--ib-team);
+}
+
+.ib-msg--system .ib-bubble {
+  background: var(--ib-system);
+  border-style: dashed;
+}
+
+.ib-msg-label {
+  margin: 0 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ib-muted);
+}
+
+.ib-msg-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ib-msg-text a,
+.ib-cards a {
+  color: var(--ib-accent);
+}
+
+.ib-msg-time {
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: var(--ib-muted);
+  text-align: right;
+}
+
+.ib-img {
+  display: block;
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.ib-audio {
+  width: 240px;
+  max-width: 100%;
+  margin-bottom: 4px;
+}
+
+.ib-cards {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 13px;
+}
+
+.ib-tool {
+  align-self: flex-end;
+  max-width: min(78%, 560px);
+  font-size: 12px;
+  color: var(--ib-muted);
+  border: 1px dashed var(--ib-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.ib-tool--error {
+  color: var(--ib-error);
+}
+
+.ib-tool summary {
+  cursor: pointer;
+}
+
+.ib-tool pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.ib-composer {
+  border-top: 1px solid var(--ib-border);
+  padding: 10px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.ib-quick {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ib-compose-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.ib-input {
+  resize: vertical;
+  min-height: 44px;
+}
+
+.ib-send {
+  border: 0;
+  border-radius: 8px;
+  background: var(--ib-accent);
+  color: var(--ib-on-accent);
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+/* ── Your panel (light DOM, styled by your page) ──────── */
+.ib-panel {
+  border-left: 1px solid var(--ib-border);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ── Narrow (the inbox's own width, wherever it's embedded): list or thread ── */
+@container (max-width: 760px) {
+  .ib,
+  .ib--panel {
+    grid-template-columns: 1fr;
+  }
+
+  .ib--open .ib-list,
+  .ib:not(.ib--open) .ib-thread,
+  .ib-panel {
+    display: none;
+  }
+
+  .ib-back {
+    display: block;
+  }
+}

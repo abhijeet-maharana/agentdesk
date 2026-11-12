@@ -38,7 +38,9 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
   const { config, secrets, basePrompt } = loadConfig(options.configFile);
   if (!options.model && !process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set');
 
-  const store: Store = secrets.databaseUrl ? new PostgresStore(secrets.databaseUrl) : new MemoryStore();
+  const store: Store = secrets.databaseUrl
+    ? new PostgresStore(secrets.databaseUrl, config.storage.table)
+    : new MemoryStore();
   if (!secrets.databaseUrl)
     log.warn('DATABASE_URL is not set: chats are kept in memory and lost on restart.');
   await store.init();
