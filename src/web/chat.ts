@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { LanguageModel, ModelMessage } from 'ai';
-import { type AgentLoopParams, runAgentLoop } from '../agent/loop.js';
+import { answer, UNAVAILABLE_REPLY } from '../agent/answer.js';
+import type { AgentLoopParams } from '../agent/loop.js';
 import type { McpTools } from '../agent/mcp.js';
 import { basePrompt, recentTurnsNote, voiceCallNote, webChatNote } from '../agent/prompt.js';
-import { type Attachments, isOnHosts, mergeAttachments, type ToolRunner } from '../agent/tools.js';
+import { isOnHosts, type ToolRunner } from '../agent/tools.js';
 import type { Config, Limit, Secrets } from '../config.js';
 import { type Identity, identityNote } from '../identity.js';
 import type { Alert, Logger } from '../logger.js';
@@ -17,8 +18,7 @@ const VISIBLE_MESSAGES = 80;
 // Typed turns a voice call gets, so it continues the chat.
 const VOICE_CONTEXT_TURNS = 10;
 
-export const UNAVAILABLE_REPLY = "I'm sorry, I can't answer right now. Please try again in a few minutes.";
-const REFUSED_REPLY = "I'm sorry, I can't help with that here. Is there anything else I can do for you?";
+export { UNAVAILABLE_REPLY };
 
 /** An error the visitor may see, with the HTTP status to answer with. */
 export class ChatError extends Error {
@@ -212,14 +212,11 @@ export class WebChat {
 
   /** Writes the agent's reply to the latest message. A newer message cancels this run; the newer run answers both. */
   private async reply(key: string, identity: Identity | null, version: number): Promise<void> {
-    const { state, store, config, tools } = this.deps;
+    const { state, store, config } = this.deps;
     const isCancelled = () => state.isStale(key, version);
-    let attachments: Attachments = {};
-
     try {
-      const [instructions, agentTools, history] = await Promise.all([
+      const [instructions, history] = await Promise.all([
         this.instructions(),
-        tools.agentTools(),
         store.recent(key, config.agent.historyLimit),
       ]);
       const messages = toModelMessages(history);
@@ -227,38 +224,16 @@ export class WebChat {
       if (last?.role !== 'user') return; // nothing new to answer
       last.content = `${identityNote(identity)}\n${last.content as string}`;
 
-      const outcome = await runAgentLoop({
-        model: this.deps.model,
-        providerOptions: this.deps.providerOptions,
+      const reply = await answer(this.deps, {
         instructions,
-        tools: agentTools,
         messages,
-        executeTool: async (name, input) => {
-          const output = await tools.run(name, input, { conversationId: key, channel: CHANNEL, identity });
-          attachments = mergeAttachments(attachments, output.attachments);
-          return output;
-        },
+        context: { conversationId: key, channel: CHANNEL, identity },
         isCancelled,
-        onUsage: (u) =>
-          this.deps.log.info(
-            `usage ${key} model=${u.model} in=${u.inputTokens} cached=${u.cacheReadTokens} out=${u.outputTokens}`,
-          ),
       });
-
-      if (outcome.status === 'cancelled' || isCancelled()) return;
-      if (outcome.status === 'completed') {
-        // Links are only shown under voice replies; a typed reply already has them.
-        const { links: _links, ...shown } = attachments;
-        await this.storeReply(key, outcome.text, shown);
-      } else if (outcome.status === 'refused') {
-        await this.storeReply(key, REFUSED_REPLY, {});
-      } else {
-        await this.storeReply(key, UNAVAILABLE_REPLY, {});
-        this.deps.alert(
-          'no-reply',
-          `No usable reply for ${key} (tools: ${outcome.toolsCalled.join(' → ') || 'none'})`,
-        );
-      }
+      if (!reply) return;
+      // Links are only shown under voice replies; a typed reply already has them.
+      const { links: _links, ...shown } = reply.attachments;
+      await this.storeReply(key, reply.text, shown);
     } catch (error) {
       this.deps.alert('reply-failed', `Reply failed for ${key}: ${String(error)}`);
       if (!isCancelled()) await this.storeReply(key, UNAVAILABLE_REPLY, {}).catch(() => {});

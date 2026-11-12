@@ -23,6 +23,20 @@ export function webChatNote(config: Config): string {
   ].join('\n');
 }
 
+/** Rules for WhatsApp, added after your own instructions (the same for every customer, so the cache is shared). */
+export function whatsappNote(config: Config): string {
+  const extra = config.whatsapp?.prompt.trim();
+  return [
+    '<whatsapp_chat>',
+    'This conversation is on WhatsApp. These rules override the ones above where they differ:',
+    '- Each customer message starts with a [WhatsApp: ...] line with their number and whether your system knows them.',
+    '- Photos the customer sent are attached to their message; voice notes come as a transcript.',
+    "- Formatting: *single asterisks* for bold, plain links, and '---' on its own line to split a reply into separate messages. No markdown headings, tables or [text](url) links.",
+    ...(extra ? [extra] : []),
+    '</whatsapp_chat>',
+  ].join('\n');
+}
+
 /** Added for a live voice call, after the website chat rules. */
 export function voiceCallNote(config: Config): string {
   const voice = config.voice;

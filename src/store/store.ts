@@ -29,6 +29,19 @@ export interface MessageData {
   userId?: string;
   /** On a tool row: the call and its raw result. */
   tool?: { name: string; input: Record<string, unknown>; result: string; isError: boolean };
+  /** Sent to the customer by your own app, not by the agent (admin API `context`). The agent reads it. */
+  context?: boolean;
+  /** Your own id for a `context` message. */
+  ref?: string;
+  /** WhatsApp details: the customer's message id, type and media, or the ids of what was sent. */
+  whatsapp?: {
+    id?: string;
+    type?: string;
+    name?: string;
+    media?: { id: string; mimeType: string; caption?: string; filename?: string };
+    sent?: string[];
+    error?: string;
+  };
 }
 
 export interface StoredMessage {

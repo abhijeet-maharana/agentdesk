@@ -1,6 +1,6 @@
 # Contributing
 
-agentdesk started as the support chat of a small online shop and runs there in production. Issues and pull requests are welcome. Support is best-effort, with no promises on response times.
+agentdesk started as the support chat and WhatsApp agent of a small online shop and runs there in production. Issues and pull requests are welcome. Support is best-effort, with no promises on response times.
 
 ## Setup
 
@@ -18,6 +18,7 @@ To try a change by hand, run the demo shop and agentdesk side by side (README, "
 | Folder | What |
 |---|---|
 | `src/web/` | The website channel: chat, voice calls, rate limits |
+| `src/whatsapp/` | The WhatsApp channel: Meta webhook and sender, voice notes |
 | `src/agent/` | The agent loop, MCP client, tools, prompt |
 | `src/store/` | Chat storage (memory and Postgres) |
 | `src/voice/` | Gemini Live tokens |

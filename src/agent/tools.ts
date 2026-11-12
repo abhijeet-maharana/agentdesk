@@ -22,6 +22,8 @@ export interface ToolContext {
   conversationId: string;
   channel: string;
   identity: Identity | null;
+  /** The customer's number, digits only (WhatsApp). */
+  phone?: string;
 }
 
 /** What a reply shows besides its text. */
@@ -72,16 +74,17 @@ const cardSchema = z.object({
 export class ToolRunner {
   constructor(private readonly options: ToolRunnerOptions) {}
 
-  /** Every tool the model can call, without the hidden arguments. */
-  async specs(): Promise<ToolSpec[]> {
+  /** Every tool the model can call on `channel`, without the hidden arguments. */
+  async specs(channel = 'web'): Promise<ToolSpec[]> {
     const mcpTools = this.options.mcp ? await this.options.mcp.tools() : [];
-    const own = this.options.login ? [SHOW_LOGIN] : [];
+    // Only the website has a Log in button; on WhatsApp the number is the login.
+    const own = this.options.login && channel === 'web' ? [SHOW_LOGIN] : [];
     return [...mcpTools.map((t) => this.toSpec(t)), ...own];
   }
 
   /** The tools for the AI SDK. They have no `execute`: the agent loop runs them through `run`. */
-  async agentTools(): Promise<ToolSet> {
-    const specs = await this.specs();
+  async agentTools(channel = 'web'): Promise<ToolSet> {
+    const specs = await this.specs(channel);
     return Object.fromEntries(
       specs.map((spec) => [
         spec.name,
@@ -95,7 +98,7 @@ export class ToolRunner {
 
   /** Runs one tool call. Never throws: failures come back as `isError` for the model to handle. */
   async run(name: string, input: Record<string, unknown>, context: ToolContext): Promise<ToolOutput> {
-    if (name === SHOW_LOGIN.name && this.options.login) {
+    if (name === SHOW_LOGIN.name && this.options.login && context.channel === 'web') {
       const content = context.identity
         ? 'The customer is already logged in. Continue with their request.'
         : 'A Log in button is now shown in the chat. Ask the customer to tap it and log in, then continue.';
@@ -149,11 +152,12 @@ export class ToolRunner {
     };
   }
 
-  /** Values for the hidden arguments: the visitor's `toolArgs`, else the built-ins, else "". */
+  /** Values for the hidden arguments: the customer's `toolArgs`, else the built-ins, else "". */
   private hiddenValues(context: ToolContext): Record<string, unknown> {
     const builtIn: Record<string, string> = {
       channel: context.channel,
       conversation_id: context.conversationId,
+      ...(context.phone ? { phone: context.phone } : {}),
     };
     return Object.fromEntries(
       this.options.hiddenArgs.map((name) => [

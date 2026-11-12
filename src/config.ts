@@ -53,7 +53,7 @@ const configSchema = z.object({
       /**
        * Tool arguments agentdesk fills in itself and hides from the model, so it can never
        * supply or spoof them. Values come from the visitor's identity token (`toolArgs`),
-       * else the built-ins `channel` and `conversation_id`, else "".
+       * else the built-ins `channel`, `conversation_id` and `phone` (WhatsApp), else "".
        */
       hiddenArgs: z.array(z.string()).default([]),
     })
@@ -109,6 +109,54 @@ const configSchema = z.object({
     })
     .optional(),
 
+  /** The WhatsApp channel (Meta Cloud API). Needs WHATSAPP_TOKEN and WHATSAPP_APP_SECRET. */
+  whatsapp: z
+    .object({
+      /** The business number's id in Meta (WhatsApp Manager → API Setup). */
+      phoneNumberId: z.string().min(1),
+      apiVersion: z.string().default('v22.0'),
+      /**
+       * Your app's lookup of a customer by phone number. agentdesk POSTs `{ "phone": "<digits>" }`
+       * with `Authorization: Bearer ADMIN_TOKEN` and expects `{ "token": "<identity token>" }`:
+       * the same HS256 token as for logged-in website visitors, so `toolArgs` reach your tools.
+       * Without it, tools get the built-in `phone` hidden argument only.
+       */
+      identityUrl: z.string().url().optional(),
+      /** Extra instructions for WhatsApp, added after the built-in ones. */
+      prompt: z.string().default(''),
+      /** How many of the newest photos the agent looks at (older ones stay as text). */
+      imagesInContext: z.number().int().min(0).max(5).default(2),
+      /** Cards as WhatsApp catalog messages (card id = the product's retailer id in this catalog). */
+      catalog: z
+        .object({
+          id: z.string().min(1),
+          header: z.string().default('Products'),
+          body: z.string().default('Tap a product to see the details.'),
+        })
+        .optional(),
+      /** Voice notes: transcription in, voice replies out, through any OpenAI-compatible API. */
+      audio: z
+        .object({
+          baseUrl: z.string().url(),
+          transcriptionModel: z.string(),
+          /** `transcriptions`: POST /audio/transcriptions. `chat`: the audio goes to a chat model (e.g. Gemini). */
+          transcriptionApi: z.enum(['transcriptions', 'chat']).default('transcriptions'),
+          /** Voice replies are off without it. */
+          speechModel: z.string().optional(),
+          speechVoice: z.string().default('alloy'),
+          /** What the speech API returns; it is converted to OGG Opus (needs ffmpeg). */
+          speechFormat: z.enum(['wav', 'mp3', 'opus']).default('wav'),
+          /** Also reply by voice when the customer's text matches (case-insensitive regex). */
+          voiceRequestPattern: z.string().optional(),
+          /** Never reply by voice when the customer's text matches, e.g. "no voice". */
+          textRequestPattern: z.string().optional(),
+          /** A spoken reply is also sent as text when it matches (links, reference numbers). */
+          alsoAsTextPattern: z.string().default('https?://'),
+        })
+        .optional(),
+    })
+    .optional(),
+
   limits: z
     .object({
       messagesPerConversation: limit(20, 10),
@@ -118,6 +166,8 @@ const configSchema = z.object({
       /** All visitors together: your daily voice budget. */
       voiceCallsPerDay: limit(100, 24 * 60),
       voiceToolCallsPerCall: limit(40, 10),
+      /** Replies per WhatsApp number; messages over it are stored but not answered. */
+      repliesPerWhatsAppNumber: limit(15, 5),
     })
     .prefault({}),
 });
@@ -137,6 +187,14 @@ export interface Secrets {
   adminToken?: string;
   /** Slack-compatible incoming webhook for errors. */
   alertWebhookUrl?: string;
+  /** WhatsApp Cloud API access token (a system user token). */
+  whatsappToken?: string;
+  /** Your Meta app's secret: checks that webhooks come from Meta. */
+  whatsappAppSecret?: string;
+  /** Any string; Meta sends it back once when you register the webhook URL. */
+  whatsappVerifyToken?: string;
+  /** Key for `whatsapp.audio.baseUrl`. */
+  audioApiKey?: string;
 }
 
 export interface LoadedConfig {
@@ -180,6 +238,10 @@ export function readSecrets(env: NodeJS.ProcessEnv = process.env): Secrets {
     identitySecret: value('IDENTITY_SECRET'),
     adminToken: value('ADMIN_TOKEN'),
     alertWebhookUrl: value('ALERT_WEBHOOK_URL'),
+    whatsappToken: value('WHATSAPP_TOKEN'),
+    whatsappAppSecret: value('WHATSAPP_APP_SECRET'),
+    whatsappVerifyToken: value('WHATSAPP_VERIFY_TOKEN'),
+    audioApiKey: value('AUDIO_API_KEY'),
   };
 }
 

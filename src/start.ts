@@ -13,6 +13,9 @@ import { MemoryStore } from './store/memory-store.js';
 import { PostgresStore } from './store/postgres-store.js';
 import type { Store } from './store/store.js';
 import { WebChat } from './web/chat.js';
+import { Audio } from './whatsapp/audio.js';
+import { WhatsAppChat } from './whatsapp/chat.js';
+import { MetaClient } from './whatsapp/meta.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -50,11 +53,12 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
     linkHosts: config.web.linkHosts,
   });
 
-  const chat = new WebChat({
+  const shared = {
     config,
     secrets,
     ownPrompt: basePrompt,
     store,
+    // One state for both channels: they never share a conversation key.
     state: new ChatState(),
     tools,
     mcp,
@@ -63,25 +67,30 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
       anthropic: {
         effort: config.agent.effort,
         // Caches the conversation so far between tool rounds.
-        cacheControl: { type: 'ephemeral' },
-        ...(config.agent.refusalFallback ? { fallbacks: 'default' } : {}),
+        cacheControl: { type: 'ephemeral' as const },
+        ...(config.agent.refusalFallback ? { fallbacks: 'default' as const } : {}),
       },
     },
     log,
     alert,
-  });
+  };
+  const chat = new WebChat(shared);
+  const whatsapp = startWhatsApp(shared);
 
   const app = createApp({
     config,
     secrets,
     store,
     chat,
+    whatsapp,
     log,
     widgetPath: path.join(root, 'public', 'widget.js'),
   });
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
-      log.info(`agentdesk listening on :${port} (voice ${chat.voiceAvailable ? 'on' : 'off'})`);
+      log.info(
+        `agentdesk listening on :${port} (voice ${chat.voiceAvailable ? 'on' : 'off'}, WhatsApp ${whatsapp ? 'on' : 'off'})`,
+      );
       resolve(s);
     });
   });
@@ -93,4 +102,32 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
       await Promise.allSettled([store.close(), mcp?.close()]);
     },
   };
+}
+
+/**
+ * The WhatsApp channel, when configured. Missing secrets turn it off with an error instead of
+ * stopping the server, so the website chat keeps working.
+ */
+function startWhatsApp(shared: Omit<ConstructorParameters<typeof WhatsAppChat>[0], 'meta' | 'audio'>) {
+  const settings = shared.config.whatsapp;
+  if (!settings) return undefined;
+  const { whatsappToken, audioApiKey, adminToken, identitySecret } = shared.secrets;
+  const missing = [
+    !whatsappToken && 'WHATSAPP_TOKEN',
+    settings.identityUrl && !adminToken && 'ADMIN_TOKEN',
+    settings.identityUrl && !identitySecret && 'IDENTITY_SECRET',
+  ].filter(Boolean);
+  if (missing.length || !whatsappToken) {
+    shared.log.error(`WhatsApp is off: set ${missing.join(', ')}`);
+    return undefined;
+  }
+  return new WhatsAppChat({
+    ...shared,
+    meta: new MetaClient({
+      phoneNumberId: settings.phoneNumberId,
+      apiVersion: settings.apiVersion,
+      token: whatsappToken,
+    }),
+    audio: settings.audio ? new Audio(settings.audio, audioApiKey) : undefined,
+  });
 }

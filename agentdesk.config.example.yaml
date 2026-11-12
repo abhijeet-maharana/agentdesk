@@ -57,6 +57,26 @@ voice:
   voice: Kore
   maxMinutes: 5
 
+# WhatsApp (Meta Cloud API). Secrets: WHATSAPP_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN.
+# Register https://<your host>/v1/whatsapp/webhook in your Meta app. Guide: docs/whatsapp.md
+# whatsapp:
+#   phoneNumberId: "123456789012345"
+#   # Your app's customer lookup by phone (returns an identity token, like for website logins).
+#   identityUrl: https://shop.example.com/api/agentdesk/whatsapp-identity
+#   prompt: |
+#     - Customers can also email hello@example.com.
+#   # Cards as WhatsApp catalog messages (card id = retailer id). Without it: photos with a link.
+#   catalog: { id: "987654321", header: "Our products" }
+#   # Voice notes through any OpenAI-compatible API (AUDIO_API_KEY).
+#   audio:
+#     baseUrl: https://api.openai.com/v1
+#     transcriptionModel: gpt-4o-mini-transcribe
+#     speechModel: gpt-4o-mini-tts
+#     speechVoice: alloy
+#     speechFormat: opus
+#     voiceRequestPattern: "send (a )?voice|voice note"
+#     textRequestPattern: "no voice|text only"
+
 limits:
   messagesPerConversation: { max: 20, perMinutes: 10 }
   messagesPerIp: { max: 60, perMinutes: 10 }
@@ -64,3 +84,4 @@ limits:
   voiceCallsPerIp: { max: 6, perMinutes: 60 }
   voiceCallsPerDay: { max: 100, perMinutes: 1440 }
   voiceToolCallsPerCall: { max: 40, perMinutes: 10 }
+  repliesPerWhatsAppNumber: { max: 15, perMinutes: 5 }

@@ -1,12 +1,12 @@
 # agentdesk
 
-**A self-hosted AI support agent for your website: a chat widget with live voice calls, running your own tools.**
+**A self-hosted AI support agent for your website and WhatsApp: a chat widget with live voice calls, and your WhatsApp number, running your own tools.**
 
 ![A visitor asks what the shop sells and gets product cards, asks about an order, logs in, and gets the order status](docs/media/demo.gif)
 
 Add one `<script>` tag to your site and visitors get a chat button. They type, or tap 🎙 and talk, to an AI agent (Claude for text, Gemini Live for voice) that answers from *your* tools: products, orders, bookings, whatever your MCP server exposes. Logged-in visitors get answers about their own account; guests get a "Log in" button when they need one. Your team can read every chat and reply from the admin API.
 
-WhatsApp is next on the roadmap: same agent, same tools, second channel.
+The same agent answers on WhatsApp too: photos, voice notes, catalog messages and all ([docs/whatsapp.md](docs/whatsapp.md)).
 
 ## Features
 
@@ -15,6 +15,7 @@ WhatsApp is next on the roadmap: same agent, same tools, second channel.
 - **Live voice calls.** Gemini Live, straight from the browser with a one-use token. The prompt, tools and model are locked into the token, so it can't be reused for anything else. The transcript lands in the chat.
 - **Logged-in visitors.** Your site signs a short-lived identity token; agentdesk passes per-user values to your tools as hidden arguments the model never sees or sets.
 - **Cards.** A tool can return product (or any) cards: photo, title, price, link.
+- **WhatsApp.** Your Business number through Meta's Cloud API: photos the agent can see, voice notes in and out, cards as catalog messages ([docs/whatsapp.md](docs/whatsapp.md)).
 - **Your team in the loop.** List chats, read them with every tool call, and reply as a person.
 - **Built for real traffic.** A newer message cancels the running reply, prompt caching across visitors, rate limits per chat, IP and day, error alerts to Slack.
 
@@ -70,7 +71,7 @@ agentdesk talks to one MCP server (`mcp.url`). Three conventions on top of plain
 
 | Convention | What it does |
 |---|---|
-| `mcp.hiddenArgs: [user_token]` | agentdesk fills these arguments itself and removes them from the schema the model sees. Values come from the visitor's identity token (`toolArgs`), else the built-ins `channel` and `conversation_id`, else `""`. Your tool trusts them; the model can't spoof them. |
+| `mcp.hiddenArgs: [user_token]` | agentdesk fills these arguments itself and removes them from the schema the model sees. Values come from the customer's identity token (`toolArgs`), else the built-ins `channel` (`web` or `whatsapp`), `conversation_id` and `phone` (WhatsApp), else `""`. Your tool trusts them; the model can't spoof them. |
 | `structuredContent: { cards: [...] }` | Shown as cards under the reply. Each card: `id`, `title`, `url`, and optional `subtitle`, `price`, `originalPrice`, `image`. A numeric price gets the widget's currency. |
 | `mcp.promptResource: your://instructions` | A resource whose text is added to the agent's instructions, so the prompt can live with your tools. |
 
@@ -90,6 +91,8 @@ Secrets come only from the environment ([.env.example](.env.example)). Each can 
 | `IDENTITY_SECRET` | Logged-in visitors (HS256 identity tokens) |
 | `ADMIN_TOKEN` | The admin API |
 | `ALERT_WEBHOOK_URL` | Error alerts to a Slack-compatible webhook |
+| `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | The WhatsApp channel ([docs/whatsapp.md](docs/whatsapp.md)) |
+| `AUDIO_API_KEY` | WhatsApp voice notes (`whatsapp.audio`) |
 
 ## Run in production
 
@@ -107,7 +110,9 @@ Put it behind your reverse proxy with HTTPS (the microphone needs a secure page)
 |---|---|
 | `GET /v1/admin/conversations?limit=50` | Latest chats |
 | `GET /v1/admin/conversations/:key` | One chat, with every tool call and its raw result |
-| `POST /v1/admin/conversations/:key/messages` `{ "text": "..." }` | Reply as your team (shown with `teamLabel`) |
+| `POST /v1/admin/conversations/:key/messages` `{ "text": "..." }` | Reply as your team (shown with `teamLabel`; sent on WhatsApp for `whatsapp:` chats) |
+| `POST /v1/admin/conversations/:key/context` `{ "text": "...", "ref"?: "..." }` | Something your app sent the customer itself; the agent reads it, nothing is sent |
+| `POST /v1/admin/whatsapp/webhook` | Pass on a Meta webhook body your own app received ([docs/whatsapp.md](docs/whatsapp.md)) |
 
 ## How it works
 

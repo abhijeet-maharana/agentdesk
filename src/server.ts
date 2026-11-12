@@ -9,6 +9,8 @@ import { IdentityError, verifyIdentity } from './identity.js';
 import type { Logger } from './logger.js';
 import type { Store } from './store/store.js';
 import { ChatError, type WebChat } from './web/chat.js';
+import { CHANNEL as WHATSAPP, type WhatsAppChat } from './whatsapp/chat.js';
+import { MetaError, verifySignature } from './whatsapp/meta.js';
 
 const conversationId = z.string().uuid();
 const sessionId = z.string().uuid();
@@ -30,12 +32,18 @@ const transcriptBody = z.object({
     .max(80),
 });
 const teamReplyBody = z.object({ text: z.string().trim().min(1).max(4000) });
+const contextBody = z.object({
+  text: z.string().trim().min(1).max(4000),
+  ref: z.string().max(200).optional(),
+});
 
 export interface ServerDeps {
   config: Config;
   secrets: Secrets;
   store: Store;
   chat: WebChat;
+  /** Set when the config has a `whatsapp:` section. */
+  whatsapp?: WhatsAppChat;
   log: Logger;
   /** The built widget bundle. */
   widgetPath: string;
@@ -43,12 +51,13 @@ export interface ServerDeps {
 
 /** The HTTP API: the widget's chat endpoints, the widget itself, and the admin API. */
 export function createApp(deps: ServerDeps): Hono {
-  const { config, secrets, chat, store } = deps;
+  const { config, secrets, chat, store, whatsapp } = deps;
   const app = new Hono();
 
   app.onError((error, c) => {
     if (error instanceof ChatError) return c.json({ error: error.message }, error.status);
     if (error instanceof IdentityError) return c.json({ error: error.message }, 401);
+    if (error instanceof MetaError) return c.json({ error: error.message }, 502);
     if (error instanceof z.ZodError) return c.json({ error: 'Invalid request.' }, 400);
     deps.log.error(`${c.req.method} ${c.req.path} failed: ${String(error)}`);
     return c.json({ error: 'Something went wrong. Please try again.' }, 500);
@@ -126,6 +135,29 @@ export function createApp(deps: ServerDeps): Hono {
     return c.json({ saved: await chat.saveVoiceTurns(id, session, turns) });
   });
 
+  // ── WhatsApp webhook (Meta calls it; register https://<host>/v1/whatsapp/webhook) ──
+  if (whatsapp) {
+    app.get('/v1/whatsapp/webhook', (c) => {
+      const ok =
+        c.req.query('hub.mode') === 'subscribe' &&
+        Boolean(secrets.whatsappVerifyToken) &&
+        c.req.query('hub.verify_token') === secrets.whatsappVerifyToken;
+      return ok ? c.text(c.req.query('hub.challenge') ?? '') : c.text('Forbidden', 403);
+    });
+
+    app.post('/v1/whatsapp/webhook', async (c) => {
+      const raw = await c.req.text();
+      if (
+        !secrets.whatsappAppSecret ||
+        !verifySignature(raw, c.req.header('x-hub-signature-256'), secrets.whatsappAppSecret)
+      ) {
+        return c.text('Invalid signature', 401);
+      }
+      await whatsapp.receive(JSON.parse(raw));
+      return c.text('OK');
+    });
+  }
+
   // ── Admin API (your team; Authorization: Bearer ADMIN_TOKEN) ─────────────
   app.use('/v1/admin/*', async (c, next) => {
     const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? '';
@@ -147,7 +179,36 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.post('/v1/admin/conversations/:key/messages', async (c) => {
     const { text } = teamReplyBody.parse(await c.req.json());
-    return c.json({ message: await chat.teamReply(c.req.param('key'), text) });
+    const key = c.req.param('key');
+    if (key.startsWith(`${WHATSAPP}:`)) {
+      if (!whatsapp) throw new ChatError(404, 'WhatsApp is not configured.');
+      return c.json({ message: await whatsapp.teamReply(key, text) });
+    }
+    return c.json({ message: await chat.teamReply(key, text) });
+  });
+
+  /** A message your own app sent the customer (a notification, a code): the agent reads it, nothing is sent. */
+  app.post('/v1/admin/conversations/:key/context', async (c) => {
+    const { text, ref } = contextBody.parse(await c.req.json());
+    const key = c.req.param('key');
+    const channel = key.split(':')[0] ?? '';
+    const message = await store.add({
+      conversationId: key,
+      channel,
+      role: 'assistant',
+      text,
+      data: { context: true, ...(ref ? { ref } : {}) },
+    });
+    return c.json({ message });
+  });
+
+  /**
+   * For an app that keeps its own Meta webhook: it checks Meta's signature itself and passes
+   * on the webhook body (all of it, or only the customers agentdesk should answer).
+   */
+  app.post('/v1/admin/whatsapp/webhook', async (c) => {
+    if (!whatsapp) throw new ChatError(404, 'WhatsApp is not configured.');
+    return c.json({ received: await whatsapp.receive(await c.req.json()) });
   });
 
   return app;
