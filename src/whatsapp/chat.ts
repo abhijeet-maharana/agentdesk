@@ -84,7 +84,7 @@ export class WhatsAppChat {
         continue;
       }
       const version = this.deps.state.nextVersion(key);
-      void this.reply(phone, message, version).catch((error: unknown) =>
+      void this.reply(phone, { latest: message }, version).catch((error: unknown) =>
         this.deps.log.error(`WhatsApp reply crashed for ${key}: ${String(error)}`),
       );
     }
@@ -104,10 +104,26 @@ export class WhatsAppChat {
     });
   }
 
-  private async reply(phone: string, latest: InboundMessage, version: number): Promise<void> {
+  /**
+   * Has the agent write to the customer now, without a new message from them: `note` tells it
+   * why (e.g. "30 minutes have passed since they activated their sticker"). The note is neither
+   * sent nor stored. Inside WhatsApp's 24-hour window only, which Meta enforces.
+   */
+  async nudge(conversationId: string, note: string): Promise<void> {
+    const phone = conversationId.slice(CHANNEL.length + 1);
+    const version = this.deps.state.nextVersion(conversationId);
+    await this.reply(phone, { note }, version);
+  }
+
+  private async reply(
+    phone: string,
+    trigger: { latest: InboundMessage } | { note: string },
+    version: number,
+  ): Promise<void> {
     const key = whatsappKey(phone);
     const isCancelled = () => this.deps.state.isStale(key, version);
-    const stopTyping = this.keepTyping(latest.id, isCancelled);
+    const latest = 'latest' in trigger ? trigger.latest : undefined;
+    const stopTyping = latest ? this.keepTyping(latest.id, isCancelled) : () => {};
     try {
       const [instructions, history, identity] = await Promise.all([
         this.instructions(),
@@ -115,9 +131,17 @@ export class WhatsAppChat {
         this.identity(phone),
       ]);
       const messages = await this.toModelMessages(history);
+      if ('note' in trigger) messages.push({ role: 'user', content: `[System: ${trigger.note}]` });
       const last = messages.at(-1);
       if (last?.role !== 'user') return;
-      prepend(last, customerNote(phone, latest.name, identity));
+      prepend(
+        last,
+        customerNote(
+          phone,
+          latest?.name ?? history.findLast((r) => r.data?.whatsapp?.name)?.data?.whatsapp?.name,
+          identity,
+        ),
+      );
 
       const reply = await answer(this.deps, {
         instructions,
@@ -125,10 +149,13 @@ export class WhatsAppChat {
         context: { conversationId: key, channel: CHANNEL, identity, phone },
         isCancelled,
       });
-      if (reply && !isCancelled()) await this.send(phone, reply, history.at(-1), isCancelled);
+      // A nudge with no usable answer stays silent: the customer didn't ask anything.
+      if (reply && !isCancelled() && (latest || reply.text !== UNAVAILABLE_REPLY)) {
+        await this.send(phone, reply, latest ? history.at(-1) : undefined, isCancelled);
+      }
     } catch (error) {
       this.deps.alert('whatsapp-reply', `WhatsApp reply failed for ${key}: ${String(error)}`);
-      if (!isCancelled())
+      if (latest && !isCancelled())
         await this.send(phone, { text: UNAVAILABLE_REPLY, attachments: {} }, undefined, isCancelled);
     } finally {
       stopTyping();
@@ -146,7 +173,7 @@ export class WhatsAppChat {
     const bubbles = splitBubbles(reply.text);
     const cards = reply.attachments.cards ?? [];
     const sent: string[] = [];
-    let spoken = false;
+    let spoken: { id: string; mimeType: string } | undefined;
     let error: string | undefined;
 
     try {
@@ -155,8 +182,9 @@ export class WhatsAppChat {
         if (i > 0) await this.sleep(BUBBLE_GAP_MS);
         if (i === 0 && audio?.canSpeak && this.wantsVoice(customerRow)) {
           try {
-            sent.push(await meta.sendVoice(phone, await audio.speak(bubble)));
-            spoken = true;
+            const voice = await meta.sendVoice(phone, await audio.speak(bubble));
+            sent.push(voice.messageId);
+            spoken = { id: voice.mediaId, mimeType: 'audio/ogg' };
             if (!new RegExp(this.settings.audio?.alsoAsTextPattern ?? 'https?://', 'i').test(bubble))
               continue;
           } catch (voiceError) {
@@ -179,7 +207,7 @@ export class WhatsAppChat {
       data: {
         ...(cards.length ? { cards } : {}),
         ...(spoken ? { voice: true } : {}),
-        whatsapp: { sent, ...(error ? { error } : {}) },
+        whatsapp: { sent, ...(spoken ? { media: spoken } : {}), ...(error ? { error } : {}) },
       },
     });
   }

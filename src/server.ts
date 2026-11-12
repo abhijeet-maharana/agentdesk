@@ -32,6 +32,19 @@ const transcriptBody = z.object({
     .max(80),
 });
 const teamReplyBody = z.object({ text: z.string().trim().min(1).max(4000) });
+const importBody = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        text: z.string().trim().min(1).max(4000),
+        createdAt: z.string().datetime({ offset: true }),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+const nudgeBody = z.object({ note: z.string().trim().min(1).max(2000) });
 const contextBody = z.object({
   text: z.string().trim().min(1).max(4000),
   ref: z.string().max(200).optional(),
@@ -200,6 +213,44 @@ export function createApp(deps: ServerDeps): Hono {
       data: { context: true, ...(ref ? { ref } : {}) },
     });
     return c.json({ message });
+  });
+
+  /**
+   * Earlier messages from your own records (e.g. before agentdesk answered this number), oldest
+   * first, so the agent knows the conversation. Only into an empty conversation: a second
+   * import gets 409, so calling it on every first contact is safe.
+   */
+  app.post('/v1/admin/conversations/:key/import', async (c) => {
+    const { messages } = importBody.parse(await c.req.json());
+    const key = c.req.param('key');
+    if ((await store.recent(key, 1, { includeTools: true })).length > 0) {
+      throw new ChatError(409, 'This conversation already has messages.');
+    }
+    const channel = key.split(':')[0] ?? '';
+    // One at a time, so the rows keep their order.
+    for (const m of messages) {
+      await store.add({
+        conversationId: key,
+        channel,
+        role: m.role,
+        text: m.text,
+        data: { imported: true },
+        createdAt: m.createdAt,
+      });
+    }
+    return c.json({ imported: messages.length });
+  });
+
+  /** The agent writes to a WhatsApp customer now; `note` says why (not sent, not stored). Runs in the background. */
+  app.post('/v1/admin/conversations/:key/nudge', async (c) => {
+    const { note } = nudgeBody.parse(await c.req.json());
+    const key = c.req.param('key');
+    if (!whatsapp || !key.startsWith(`${WHATSAPP}:`))
+      throw new ChatError(404, 'Only WhatsApp chats can be nudged.');
+    void whatsapp
+      .nudge(key, note)
+      .catch((error: unknown) => deps.log.error(`Nudge failed for ${key}: ${String(error)}`));
+    return c.json({ ok: true }, 202);
   });
 
   /**

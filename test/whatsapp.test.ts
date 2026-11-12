@@ -293,7 +293,7 @@ describe('WhatsApp channel', () => {
       speak: vi.fn(async () => Buffer.from('ogg')),
     };
     const model = mockModel([text('It ships tomorrow.')]);
-    const { whatsappChat, graph } = setup(
+    const { whatsappChat, graph, store } = setup(
       [],
       { audio: { baseUrl: 'http://audio/v1', transcriptionModel: 't', speechModel: 's' } },
       { audio },
@@ -305,6 +305,12 @@ describe('WhatsApp channel', () => {
     await eventually(() => graph.sent.length === 1);
     expect(audio.transcribe).toHaveBeenCalled();
     expect(graph.sent[0]).toMatchObject({ type: 'audio', audio: { id: 'uploaded-audio' } });
+    await eventually(async () => (await store.recent(whatsappKey(PHONE), 5)).length === 2);
+    const [, stored] = await store.recent(whatsappKey(PHONE), 5);
+    expect(stored?.data).toMatchObject({
+      voice: true,
+      whatsapp: { media: { id: 'uploaded-audio', mimeType: 'audio/ogg' } },
+    });
     const prompt = JSON.stringify(model.doGenerateCalls[0]?.prompt);
     expect(prompt).toContain('[Voice note] where is my order');
   });
@@ -339,5 +345,39 @@ describe('WhatsApp channel', () => {
     expect(res.status).toBe(200);
     expect(graph.sent[0]).toMatchObject({ to: PHONE, text: { body: 'Hi, this is Ravi from the team.' } });
     expect((await rows())[0]).toMatchObject({ data: { team: true, whatsapp: { sent: ['out-1'] } } });
+  });
+
+  it('writes to the customer when nudged, without storing the note', async () => {
+    const { app, graph, rows } = setup([text('Did your sticker activation go well?')]);
+    const res = await app.request(`/v1/admin/conversations/${whatsappKey(PHONE)}/nudge`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ note: '30 minutes have passed since activation' }),
+    });
+    expect(res.status).toBe(202);
+    await eventually(() => graph.sent.length === 1);
+    expect(graph.sent[0]).toMatchObject({ text: { body: 'Did your sticker activation go well?' } });
+    await eventually(async () => (await rows()).length === 1);
+    expect((await rows()).map((r) => r.role)).toEqual(['assistant']);
+  });
+
+  it('imports earlier history once, into an empty conversation only', async () => {
+    const { app, rows } = setup([]);
+    const post = (messages: unknown) =>
+      app.request(`/v1/admin/conversations/${whatsappKey(PHONE)}/import`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+    const history = [
+      { role: 'user', text: 'hi', createdAt: '2026-11-10T10:00:00Z' },
+      { role: 'assistant', text: 'Hello!', createdAt: '2026-11-10T10:00:05Z' },
+    ];
+    expect((await post(history)).status).toBe(200);
+    expect((await post(history)).status).toBe(409);
+    expect((await rows()).map((r) => [r.role, r.text, r.createdAt, r.data])).toEqual([
+      ['user', 'hi', '2026-11-10T10:00:00Z', { imported: true }],
+      ['assistant', 'Hello!', '2026-11-10T10:00:05Z', { imported: true }],
+    ]);
   });
 });

@@ -15,7 +15,7 @@ export class MemoryStore implements Store {
       role: message.role,
       text: message.text,
       data: message.data ?? null,
-      createdAt: new Date().toISOString(),
+      createdAt: message.createdAt ?? new Date().toISOString(),
     };
     this.rows.push(row);
     return row;
@@ -43,6 +43,12 @@ export class MemoryStore implements Store {
       });
     }
     return [...byId.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt)).slice(0, limit);
+  }
+
+  async deleteBefore(cutoff: Date): Promise<number> {
+    const before = this.rows.length;
+    this.rows = this.rows.filter((r) => new Date(r.createdAt) >= cutoff);
+    return before - this.rows.length;
   }
 
   async close(): Promise<void> {}

@@ -23,7 +23,7 @@ export { UNAVAILABLE_REPLY };
 /** An error the visitor may see, with the HTTP status to answer with. */
 export class ChatError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 429 | 500 | 503,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503,
     message: string,
   ) {
     super(message);

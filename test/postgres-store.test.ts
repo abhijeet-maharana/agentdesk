@@ -48,4 +48,19 @@ describe.skipIf(!url)('PostgresStore', () => {
       [a, 'Hello', 2],
     ]);
   });
+
+  it('keeps an imported time and deletes messages before a cutoff', async () => {
+    const c = `test:${randomUUID()}`;
+    const old = await store.add({
+      conversationId: c,
+      channel: 'web',
+      role: 'user',
+      text: 'Old',
+      createdAt: '2000-01-01T00:00:00Z',
+    });
+    expect(old.createdAt).toBe('2000-01-01T00:00:00.000Z');
+    await store.add({ conversationId: c, channel: 'web', role: 'user', text: 'Now' });
+    expect(await store.deleteBefore(new Date('2000-01-02T00:00:00Z'))).toBeGreaterThanOrEqual(1);
+    expect((await store.recent(c, 10)).map((m) => m.text)).toEqual(['Now']);
+  });
 });

@@ -62,8 +62,8 @@ export class MetaClient {
     return this.send(to, { type: 'image', image: { link, caption } });
   }
 
-  /** A voice note: uploads OGG Opus audio, then sends it. */
-  async sendVoice(to: string, ogg: Buffer): Promise<string> {
+  /** A voice note: uploads OGG Opus audio, then sends it. The media id stays downloadable for 30 days. */
+  async sendVoice(to: string, ogg: Buffer): Promise<{ messageId: string; mediaId: string }> {
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('type', 'audio/ogg');
@@ -75,7 +75,7 @@ export class MetaClient {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const { id } = (await this.json(res, 'media upload')) as { id: string };
-    return this.send(to, { type: 'audio', audio: { id } });
+    return { messageId: await this.send(to, { type: 'audio', audio: { id } }), mediaId: id };
   }
 
   /** One product from your Meta catalog. */

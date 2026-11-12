@@ -57,6 +57,28 @@ Authorization: Bearer $ADMIN_TOKEN
 
 Nothing is sent; the agent reads it as a message from the business.
 
+## Moving an existing number
+
+When agentdesk takes over a number your app answered before, copy the conversation in first, so the agent knows it:
+
+```
+POST /v1/admin/conversations/whatsapp:<digits>/import
+{ "messages": [{ "role": "user", "text": "hi", "createdAt": "2026-11-10T10:00:00Z" }, …] }
+```
+
+Oldest first, `user` or `assistant`, up to 200. It only goes into an empty conversation (409 otherwise), so calling it on every first contact is safe.
+
+## Writing first
+
+To have the agent message a customer without a new message from them (a follow-up after a purchase, say):
+
+```
+POST /v1/admin/conversations/whatsapp:<digits>/nudge
+{ "note": "30 minutes have passed since they activated their sticker" }
+```
+
+The note tells the agent why; it is neither sent nor stored. The call returns at once (202) and the agent replies in the background. Meta only allows it within 24 hours of the customer's last message.
+
 ## Voice notes
 
 `whatsapp.audio` takes any OpenAI-compatible API:

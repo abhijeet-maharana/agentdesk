@@ -100,7 +100,7 @@ Secrets come only from the environment ([.env.example](.env.example)). Each can 
 docker compose up -d   # agentdesk + Postgres; reads .env and agentdesk.config.yaml
 ```
 
-Put it behind your reverse proxy with HTTPS (the microphone needs a secure page) and set `trustProxy: true` so rate limits see real IPs. agentdesk keeps live state (running replies, voice calls, rate limits) in memory, so run **one** instance.
+Set `retentionDays` in the config to delete old chats daily. Put it behind your reverse proxy with HTTPS (the microphone needs a secure page) and set `trustProxy: true` so rate limits see real IPs. agentdesk keeps live state (running replies, voice calls, rate limits) in memory, so run **one** instance.
 
 ## Admin API
 
@@ -112,6 +112,8 @@ Put it behind your reverse proxy with HTTPS (the microphone needs a secure page)
 | `GET /v1/admin/conversations/:key` | One chat, with every tool call and its raw result |
 | `POST /v1/admin/conversations/:key/messages` `{ "text": "..." }` | Reply as your team (shown with `teamLabel`; sent on WhatsApp for `whatsapp:` chats) |
 | `POST /v1/admin/conversations/:key/context` `{ "text": "...", "ref"?: "..." }` | Something your app sent the customer itself; the agent reads it, nothing is sent |
+| `POST /v1/admin/conversations/:key/import` `{ "messages": [{ "role", "text", "createdAt" }] }` | Earlier history from your own records, into an empty conversation only (409 otherwise) |
+| `POST /v1/admin/conversations/:key/nudge` `{ "note": "..." }` | The agent writes to a WhatsApp customer now; the note says why and is never sent |
 | `POST /v1/admin/whatsapp/webhook` | Pass on a Meta webhook body your own app received ([docs/whatsapp.md](docs/whatsapp.md)) |
 
 ## How it works

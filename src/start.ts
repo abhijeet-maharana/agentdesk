@@ -53,6 +53,8 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
     linkHosts: config.web.linkHosts,
   });
 
+  const stopCleanup = config.retentionDays ? startCleanup(store, config.retentionDays, log) : () => {};
+
   const shared = {
     config,
     secrets,
@@ -98,6 +100,7 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
   return {
     port: config.port,
     close: async () => {
+      stopCleanup();
       server.close();
       await Promise.allSettled([store.close(), mcp?.close()]);
     },
@@ -130,4 +133,19 @@ function startWhatsApp(shared: Omit<ConstructorParameters<typeof WhatsAppChat>[0
     }),
     audio: settings.audio ? new Audio(settings.audio, audioApiKey) : undefined,
   });
+}
+
+/** Deletes messages older than `days`, now and then once a day. */
+function startCleanup(store: Store, days: number, log: Logger): () => void {
+  const run = () => {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
+    store
+      .deleteBefore(cutoff)
+      .then((count) => count && log.info(`Deleted ${count} messages older than ${days} days`))
+      .catch((error: unknown) => log.error(`Old chat cleanup failed: ${String(error)}`));
+  };
+  run();
+  const timer = setInterval(run, 24 * 60 * 60_000);
+  timer.unref();
+  return () => clearInterval(timer);
 }

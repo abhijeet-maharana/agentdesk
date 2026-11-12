@@ -3,6 +3,8 @@
 # ${NAME} anywhere below is replaced with the environment variable NAME.
 
 port: 8080
+# Delete chats older than this many days, once a day. Leave out to keep them forever.
+# retentionDays: 30
 # Read the visitor's IP from X-Forwarded-For. Only behind your own reverse proxy.
 trustProxy: false
 

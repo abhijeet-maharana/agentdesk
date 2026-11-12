@@ -51,8 +51,9 @@ export class PostgresStore implements Store {
   async add(message: NewMessage): Promise<StoredMessage> {
     const data = message.data ? this.sql.json(message.data as postgres.JSONValue) : null;
     const [row] = await this.sql<Row[]>`
-      insert into agentdesk_messages (conversation_id, channel, role, text, data)
-      values (${message.conversationId}, ${message.channel}, ${message.role}, ${message.text}, ${data})
+      insert into agentdesk_messages (conversation_id, channel, role, text, data, created_at)
+      values (${message.conversationId}, ${message.channel}, ${message.role}, ${message.text}, ${data},
+              coalesce(${message.createdAt ? new Date(message.createdAt) : null}::timestamptz, now()))
       returning *`;
     if (!row) throw new Error('Insert returned no row');
     return toMessage(row);
@@ -98,6 +99,11 @@ export class PostgresStore implements Store {
       lastAt: r.created_at.toISOString(),
       messages: Number(r.messages),
     }));
+  }
+
+  async deleteBefore(cutoff: Date): Promise<number> {
+    const result = await this.sql`delete from agentdesk_messages where created_at < ${cutoff}`;
+    return result.count;
   }
 
   async close(): Promise<void> {

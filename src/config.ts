@@ -26,6 +26,8 @@ const configSchema = z.object({
   port: z.number().int().default(8080),
   /** Read the visitor's IP from X-Forwarded-For (only behind your own proxy). */
   trustProxy: z.boolean().default(false),
+  /** Messages older than this many days are deleted once a day. Unset: chats are kept forever. */
+  retentionDays: z.number().int().positive().optional(),
 
   agent: z
     .object({

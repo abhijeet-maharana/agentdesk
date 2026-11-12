@@ -33,6 +33,8 @@ export interface MessageData {
   context?: boolean;
   /** Your own id for a `context` message. */
   ref?: string;
+  /** Copied in from your own records (admin API `import`), not written in this chat. */
+  imported?: boolean;
   /** WhatsApp details: the customer's message id, type and media, or the ids of what was sent. */
   whatsapp?: {
     id?: string;
@@ -60,6 +62,8 @@ export interface NewMessage {
   role: Role;
   text: string;
   data?: MessageData | null;
+  /** Defaults to now; set for imported history. */
+  createdAt?: string;
 }
 
 export interface ConversationSummary {
@@ -78,5 +82,7 @@ export interface Store {
   /** The latest `limit` messages, oldest first. */
   recent(conversationId: string, limit: number, opts?: { includeTools?: boolean }): Promise<StoredMessage[]>;
   conversations(limit: number): Promise<ConversationSummary[]>;
+  /** Deletes messages created before `cutoff`; returns how many. */
+  deleteBefore(cutoff: Date): Promise<number>;
   close(): Promise<void>;
 }
