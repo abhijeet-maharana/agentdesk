@@ -60,7 +60,7 @@ export async function answer(
     );
     return { text: UNAVAILABLE_REPLY, attachments: {} };
   } catch (error) {
-    deps.alert('reply-failed', `Reply failed for ${context.conversationId}: ${String(error)}`);
+    deps.alert('reply-failed', `Reply failed for ${context.conversationId}: ${String(error)}`, error);
     return isCancelled() ? null : { text: UNAVAILABLE_REPLY, attachments: {} };
   }
 }

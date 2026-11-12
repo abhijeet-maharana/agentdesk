@@ -34,6 +34,14 @@ const configSchema = z.object({
    * docs/storage.md. Created if missing; an existing table with those columns (e.g. your app's own
    * WhatsApp log) is shared as it is, so your app and agentdesk see the same conversations.
    */
+  /** Errors to Sentry (optional): the project's DSN, e.g. "${SENTRY_DSN}". */
+  sentry: z
+    .object({
+      dsn: z.string().url(),
+      environment: z.string().default('production'),
+    })
+    .optional(),
+
   storage: z
     .object({
       table: z

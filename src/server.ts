@@ -9,6 +9,7 @@ import type { Config, Secrets } from './config.js';
 import { IdentityError, verifyIdentity } from './identity.js';
 import { INBOX_PAGE } from './inbox-page.js';
 import type { Logger } from './logger.js';
+import { reportError } from './sentry.js';
 import { verifyStaff } from './staff.js';
 import type { Store } from './store/store.js';
 import { ChatError, type WebChat } from './web/chat.js';
@@ -79,7 +80,9 @@ export function createApp(deps: ServerDeps): Hono {
     if (error instanceof IdentityError) return c.json({ error: error.message }, 401);
     if (error instanceof MetaError) return c.json({ error: error.message }, 502);
     if (error instanceof z.ZodError) return c.json({ error: 'Invalid request.' }, 400);
-    deps.log.error(`${c.req.method} ${c.req.path} failed: ${String(error)}`);
+    const message = `${c.req.method} ${c.req.path} failed: ${String(error)}`;
+    deps.log.error(message);
+    reportError('http', message, error);
     return c.json({ error: 'Something went wrong. Please try again.' }, 500);
   });
 

@@ -108,7 +108,7 @@ export class WebChat {
     if (await this.deps.store.pausedUntil(key)) return;
     this.deps.state.setBusy(key, true);
     void this.reply(key, identity, version).catch((error: unknown) =>
-      this.deps.log.error(`Reply crashed for ${key}: ${String(error)}`),
+      this.deps.alert('reply-crashed', `Reply crashed for ${key}: ${String(error)}`, error),
     );
   }
 
@@ -166,7 +166,7 @@ export class WebChat {
       return { sessionId, token, wsUrl: voice.wsUrl, setup, maxSeconds: voice.maxMinutes * 60 };
     } catch (error) {
       if (error instanceof ChatError) throw error;
-      this.deps.alert('voice-start', `Voice call could not start: ${String(error)}`);
+      this.deps.alert('voice-start', `Voice call could not start: ${String(error)}`, error);
       throw new ChatError(500, 'Voice chat could not start. Please type your question.');
     }
   }
@@ -237,7 +237,7 @@ export class WebChat {
       const { links: _links, ...shown } = reply.attachments;
       await this.storeReply(key, reply.text, shown);
     } catch (error) {
-      this.deps.alert('reply-failed', `Reply failed for ${key}: ${String(error)}`);
+      this.deps.alert('reply-failed', `Reply failed for ${key}: ${String(error)}`, error);
       if (!isCancelled()) await this.storeReply(key, UNAVAILABLE_REPLY, {}).catch(() => {});
     } finally {
       // A newer run owns the flag once it started.

@@ -108,7 +108,11 @@ export class WhatsAppChat {
       }
       const version = this.deps.state.nextVersion(key);
       void this.reply(phone, { latest: message }, version).catch((error: unknown) =>
-        this.deps.log.error(`WhatsApp reply crashed for ${key}: ${String(error)}`),
+        this.deps.alert(
+          'whatsapp-reply-crashed',
+          `WhatsApp reply crashed for ${key}: ${String(error)}`,
+          error,
+        ),
       );
     }
     return latest.size;
@@ -183,7 +187,7 @@ export class WhatsAppChat {
         await this.send(phone, reply, latest ? history.at(-1) : undefined, isCancelled);
       }
     } catch (error) {
-      this.deps.alert('whatsapp-reply', `WhatsApp reply failed for ${key}: ${String(error)}`);
+      this.deps.alert('whatsapp-reply', `WhatsApp reply failed for ${key}: ${String(error)}`, error);
       if (latest && !isCancelled())
         await this.send(phone, { text: UNAVAILABLE_REPLY, attachments: {} }, undefined, isCancelled);
     } finally {
@@ -231,12 +235,16 @@ export class WhatsAppChat {
             if (!new RegExp(this.settings.audio?.alsoAsTextPattern ?? 'https?://', 'i').test(bubble))
               continue;
           } catch (voiceError) {
-            alert('whatsapp-voice', `Voice reply failed for ${phone}, sent as text: ${String(voiceError)}`);
+            alert(
+              'whatsapp-voice',
+              `Voice reply failed for ${phone}, sent as text: ${String(voiceError)}`,
+              voiceError,
+            );
           }
         }
         await store(bubble, { whatsapp: { sent: [await meta.sendText(phone, bubble)] } });
       } catch (sendError) {
-        alert('whatsapp-send', `Sending to ${phone} failed: ${String(sendError)}`);
+        alert('whatsapp-send', `Sending to ${phone} failed: ${String(sendError)}`, sendError);
         await store(bubbles.slice(i).join('\n---\n'), { whatsapp: { error: String(sendError) } });
         return;
       }
@@ -247,7 +255,7 @@ export class WhatsAppChat {
         const sent = await this.sendCards(phone, cards);
         await store(`[Products: ${cards.map((c) => c.title).join(', ')}]`, { cards, whatsapp: { sent } });
       } catch (sendError) {
-        alert('whatsapp-send', `Sending cards to ${phone} failed: ${String(sendError)}`);
+        alert('whatsapp-send', `Sending cards to ${phone} failed: ${String(sendError)}`, sendError);
       }
     }
   }
@@ -264,7 +272,11 @@ export class WhatsAppChat {
         const section = { title: catalog.header, retailerIds: cards.map((c) => c.id).slice(0, 30) };
         return [await meta.sendProductList(phone, catalog.id, catalog.header, catalog.body, [section])];
       } catch (error) {
-        alert('whatsapp-catalog', `Catalog message failed for ${phone}, sending photos: ${String(error)}`);
+        alert(
+          'whatsapp-catalog',
+          `Catalog message failed for ${phone}, sending photos: ${String(error)}`,
+          error,
+        );
       }
     }
     const currency = this.deps.config.web.widget.currency;
@@ -382,7 +394,7 @@ export class WhatsAppChat {
       this.identities.set(phone, { identity, until: Date.now() + IDENTITY_TTL_MS });
       return identity;
     } catch (error) {
-      this.deps.alert('whatsapp-identity', `Identity lookup failed for ${phone}: ${String(error)}`);
+      this.deps.alert('whatsapp-identity', `Identity lookup failed for ${phone}: ${String(error)}`, error);
       return null;
     }
   }

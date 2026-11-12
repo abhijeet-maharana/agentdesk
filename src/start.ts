@@ -7,6 +7,7 @@ import { McpTools } from './agent/mcp.js';
 import { ToolRunner } from './agent/tools.js';
 import { loadConfig } from './config.js';
 import { consoleLogger, createAlerter, type Logger } from './logger.js';
+import { flushSentry, initSentry } from './sentry.js';
 import { createApp } from './server.js';
 import { ChatState } from './state.js';
 import { MemoryStore } from './store/memory-store.js';
@@ -36,6 +37,7 @@ export interface Agentdesk {
 export async function startAgentdesk(options: StartOptions = {}): Promise<Agentdesk> {
   const log = options.log ?? consoleLogger;
   const { config, secrets, basePrompt } = loadConfig(options.configFile);
+  initSentry(config.sentry);
   if (!options.model && !process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set');
 
   const store: Store = secrets.databaseUrl
@@ -104,7 +106,7 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
     close: async () => {
       stopCleanup();
       server.close();
-      await Promise.allSettled([store.close(), mcp?.close()]);
+      await Promise.allSettled([store.close(), mcp?.close(), flushSentry()]);
     },
   };
 }

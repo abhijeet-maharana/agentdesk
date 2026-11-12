@@ -35,6 +35,18 @@ To try a change by hand, run the demo shop and agentdesk side by side (README, "
 - **Docs in the same PR.** README or `docs/` when behaviour, config or the API changes. Run `npm run screenshots` when the widget looks different.
 - **Style:** Biome formats and lints (`npm run format`). Comments explain why, not what.
 
+## Releases
+
+Automatic: every push to `main` that passes the tests becomes a release. The version comes from the commit messages since the last one ([Conventional Commits](https://www.conventionalcommits.org)):
+
+| Commit message | Version |
+|---|---|
+| `feat!: …`, `fix!: …`, or `BREAKING CHANGE:` in the body | major (1.4.2 → 2.0.0) |
+| `feat: …` | minor (1.4.2 → 1.5.0) |
+| anything else (`fix:`, `docs:`, `refactor:`, …) | patch (1.4.2 → 1.4.3) |
+
+The workflow tags `vX.Y.Z`, publishes a GitHub release with notes, and pushes the image as `latest`, `X.Y.Z` and the commit sha. Pin `X.Y.Z` to stay on a version. The git tag is the version; `package.json` isn't bumped.
+
 ## Security
 
 Please report vulnerabilities privately through GitHub's "Report a vulnerability" (Security tab), not in a public issue.

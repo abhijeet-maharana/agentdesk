@@ -17,7 +17,7 @@ The same agent answers on WhatsApp too: photos, voice notes, catalog messages an
 - **Cards.** A tool can return product (or any) cards: photo, title, price, link.
 - **WhatsApp.** Your Business number through Meta's Cloud API: photos the agent can see, voice notes in and out, cards as catalog messages ([docs/whatsapp.md](docs/whatsapp.md)).
 - **An inbox for your team.** Every chat, website and WhatsApp, with every tool call: reply, pause the agent while you talk, star, search. On agentdesk's own `/inbox` page, or inside your admin with one script ([docs/inbox.md](docs/inbox.md)).
-- **Built for real traffic.** A newer message cancels the running reply, prompt caching across visitors, rate limits per chat, IP and day, error alerts to Slack.
+- **Built for real traffic.** A newer message cancels the running reply, prompt caching across visitors, rate limits per chat, IP and day, error alerts to Slack and Sentry.
 
 <table>
   <tr>
@@ -91,6 +91,8 @@ Secrets come only from the environment ([.env.example](.env.example)). Each can 
 | `IDENTITY_SECRET` | Logged-in visitors (HS256 identity tokens) |
 | `ADMIN_TOKEN` | The admin API |
 | `ALERT_WEBHOOK_URL` | Error alerts to a Slack-compatible webhook |
+
+Errors can also go to Sentry: add a `sentry:` section with your project's DSN to the config (see `agentdesk.config.example.yaml`). Events are tagged `service: agentdesk` and `alert: <key>`.
 | `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | The WhatsApp channel ([docs/whatsapp.md](docs/whatsapp.md)) |
 | `AUDIO_API_KEY` | WhatsApp voice notes (`whatsapp.audio`) |
 

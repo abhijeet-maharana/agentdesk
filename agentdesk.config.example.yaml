@@ -64,6 +64,11 @@ voice:
   voice: Kore
   maxMinutes: 5
 
+# Errors to Sentry (optional): your project's DSN, or "${SENTRY_DSN}" to read it from the environment.
+# sentry:
+#   dsn: https://<key>@<org>.ingest.sentry.io/<project>
+#   environment: production
+
 # Your team's inbox: /inbox, or inbox.js inside your own admin (docs/inbox.md).
 inbox:
   # Admin sites that embed inbox.js.
