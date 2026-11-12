@@ -17,6 +17,12 @@ export const CHANNEL = 'web';
 const VISIBLE_MESSAGES = 80;
 // Typed turns a voice call gets, so it continues the chat.
 const VOICE_CONTEXT_TURNS = 10;
+// Marks a voice call's transcript lines for the agent (webChatNote explains it).
+export const VOICE_MARK = '[Voice call]';
+
+// Stored when a restart cut a reply short, so the visitor isn't left waiting.
+export const INTERRUPTED_REPLY =
+  'Sorry, I was interrupted before I could answer. Please send your message again.';
 
 export { UNAVAILABLE_REPLY };
 
@@ -92,6 +98,7 @@ export class WebChat {
       [
         [`msg:c:${key}`, limits.messagesPerConversation],
         [`msg:ip:${ip}`, limits.messagesPerIp],
+        ['msg:day', limits.messagesPerDay],
       ],
       'You are sending messages too fast. Please wait a few minutes.',
     );
@@ -107,13 +114,30 @@ export class WebChat {
     // Your team took over this chat: store the message, the agent stays quiet.
     if (await this.deps.store.pausedUntil(key)) return;
     this.deps.state.setBusy(key, true);
-    void this.reply(key, identity, version).catch((error: unknown) =>
-      this.deps.alert('reply-crashed', `Reply crashed for ${key}: ${String(error)}`, error),
+    this.deps.state.track(
+      key,
+      this.reply(key, identity, version).catch((error: unknown) =>
+        this.deps.alert('reply-crashed', `Reply crashed for ${key}: ${String(error)}`, error),
+      ),
     );
   }
 
-  /** A message from your team (admin API), shown in the chat. */
+  /** Stops the reply the agent is writing in this chat (your team answered or paused it). */
+  cancelReply(conversationId: string): void {
+    this.deps.state.cancel(conversationId);
+  }
+
+  /** After a restart cut these chats' replies short: says so in each, so nobody waits for nothing. */
+  async interrupted(keys: string[]): Promise<void> {
+    for (const key of keys.filter((k) => k.startsWith(`${CHANNEL}:`))) {
+      this.cancelReply(key);
+      await this.storeReply(key, INTERRUPTED_REPLY, {}).catch(() => {});
+    }
+  }
+
+  /** A message from your team (admin API), shown in the chat. The agent's running reply is dropped. */
   async teamReply(conversationId: string, text: string): Promise<StoredMessage> {
+    this.cancelReply(conversationId);
     return this.deps.store.add({
       conversationId,
       channel: CHANNEL,
@@ -143,7 +167,7 @@ export class WebChat {
     try {
       const [instructions, specs, recent] = await Promise.all([
         this.instructions(),
-        this.deps.tools.specs(),
+        this.voiceSpecs(),
         this.deps.store.recent(key, VOICE_CONTEXT_TURNS),
       ]);
       const instruction = [
@@ -185,6 +209,10 @@ export class WebChat {
       [[`voice-tool:${sessionId}`, this.deps.config.limits.voiceToolCallsPerCall]],
       'Too many requests in this call.',
     );
+    // The browser sends these: only tools the call was given, never anything else on your MCP server.
+    if (!(await this.voiceSpecs()).some((spec) => spec.name === name)) {
+      throw new ChatError(403, 'This tool is not available on voice calls.');
+    }
     const output = await this.deps.tools.run(name, args, { conversationId: key, channel: CHANNEL, identity });
     return {
       response: output.isError ? { error: output.content } : { result: output.content },
@@ -196,6 +224,8 @@ export class WebChat {
   async saveVoiceTurns(id: string, sessionId: string, turns: VoiceTurn[]): Promise<number> {
     const key = conversationKey(id);
     this.assertVoiceCall(sessionId, key);
+    // Saved once, when the call ends: the session can't be used to add more rows afterwards.
+    this.deps.state.endVoiceCall(sessionId);
     const hosts = this.deps.config.web.linkHosts;
     // One at a time, so the rows keep their order.
     for (const turn of turns) {
@@ -255,6 +285,13 @@ export class WebChat {
     });
   }
 
+  /** The tools a voice call gets: all of them, or only `voice.tools`. */
+  private async voiceSpecs() {
+    const allowed = this.deps.config.voice?.tools;
+    const specs = await this.deps.tools.specs();
+    return allowed ? specs.filter((spec) => allowed.includes(spec.name)) : specs;
+  }
+
   private async instructions(): Promise<string> {
     const fromMcp = this.deps.mcp ? await this.deps.mcp.prompt() : '';
     return `${basePrompt(this.deps.ownPrompt, fromMcp, this.deps.config.agent.name)}\n\n${webChatNote(this.deps.config)}`;
@@ -292,7 +329,11 @@ function toWidgetMessage(row: StoredMessage): WidgetMessage {
 export function toModelMessages(rows: StoredMessage[]): ModelMessage[] {
   const messages: ModelMessage[] = rows
     .filter((r) => r.role !== 'tool' && r.text.trim())
-    .map((r) => ({ role: r.role === 'user' ? 'user' : 'assistant', content: r.text }));
+    .map((r) => ({
+      role: r.role === 'user' ? 'user' : 'assistant',
+      // Call transcripts come from the visitor's browser, so the agent is told which lines they are.
+      content: r.data?.voice ? `${VOICE_MARK} ${r.text}` : r.text,
+    }));
   if (messages[0] && messages[0].role !== 'user') {
     messages.unshift({ role: 'user', content: '[System: earlier messages from the team]' });
   }

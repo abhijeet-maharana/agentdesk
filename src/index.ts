@@ -4,8 +4,12 @@ import { startAgentdesk } from './start.js';
 
 startAgentdesk()
   .then((agentdesk) => {
+    let closing = false;
     const shutdown = () => {
-      log.info('Shutting down');
+      // A second signal (e.g. Ctrl+C twice) stops at once.
+      if (closing) process.exit(1);
+      closing = true;
+      log.info('Shutting down: finishing replies being written');
       void agentdesk.close().then(() => process.exit(0));
     };
     process.on('SIGINT', shutdown);

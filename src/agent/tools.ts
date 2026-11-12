@@ -57,14 +57,20 @@ const SHOW_LOGIN: ToolSpec = {
   },
 };
 
+/** An http(s) URL: cards become links and images on your site, so never `javascript:` or `data:`. */
+const webUrl = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), 'Only http(s) links');
+
 const cardSchema = z.object({
   id: z.coerce.string(),
   title: z.string(),
   subtitle: z.string().optional(),
   price: z.union([z.number(), z.string()]).optional(),
   originalPrice: z.union([z.number(), z.string()]).optional(),
-  image: z.string().url().optional(),
-  url: z.string().url(),
+  image: webUrl.optional(),
+  url: webUrl,
 });
 
 /**

@@ -92,9 +92,10 @@ Secrets come only from the environment ([.env.example](.env.example)). Each can 
 | `ADMIN_TOKEN` | The admin API |
 | `ALERT_WEBHOOK_URL` | Error alerts to a Slack-compatible webhook |
 
-Errors can also go to Sentry: add a `sentry:` section with your project's DSN to the config (see `agentdesk.config.example.yaml`). Events are tagged `service: agentdesk` and `alert: <key>`.
 | `WHATSAPP_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | The WhatsApp channel ([docs/whatsapp.md](docs/whatsapp.md)) |
 | `AUDIO_API_KEY` | WhatsApp voice notes (`whatsapp.audio`) |
+
+Errors can also go to Sentry: add a `sentry:` section with your project's DSN to the config (see `agentdesk.config.example.yaml`). Events are tagged `service: agentdesk` and `alert: <key>`.
 
 ## Run in production
 
@@ -102,7 +103,9 @@ Errors can also go to Sentry: add a `sentry:` section with your project's DSN to
 docker compose up -d   # agentdesk + Postgres; reads .env and agentdesk.config.yaml
 ```
 
-Set `retentionDays` in the config to delete old chats daily. Put it behind your reverse proxy with HTTPS (the microphone needs a secure page) and set `trustProxy: true` so rate limits see real IPs. agentdesk keeps live state (running replies, voice calls, rate limits) in memory, so run **one** instance.
+Set `retentionDays` in the config to delete old chats daily. Put it behind your reverse proxy with HTTPS (the microphone needs a secure page) and set `trustProxy: true` so rate limits see real IPs (the last address in `ipHeader`, default `X-Forwarded-For`; use `cf-connecting-ip` behind Cloudflare). agentdesk keeps live state (running replies, voice calls, rate limits) in memory, so run **one** instance.
+
+On SIGTERM it stops taking requests and gives replies being written up to 25 s to finish; give the container a `stop_grace_period` of 30 s (the compose file does). A website reply still cut short gets "please send that again" instead of silence.
 
 ## Inbox
 
@@ -112,7 +115,7 @@ Open `/inbox` for your team, or put the same inbox inside your own admin with `i
 
 ## Admin API
 
-`Authorization: Bearer $ADMIN_TOKEN` on every call (or a staff token from the inbox, [docs/inbox.md](docs/inbox.md)).
+`Authorization: Bearer $ADMIN_TOKEN` on every call (or a staff token from the inbox, [docs/inbox.md](docs/inbox.md)). `…/context` and `/v1/admin/whatsapp/webhook` are for your server only and take `ADMIN_TOKEN`, never a staff token. A team reply, a pause or a `context` message stops the reply the agent is writing in that chat, so it never talks over your team.
 
 | Call | Does |
 |---|---|

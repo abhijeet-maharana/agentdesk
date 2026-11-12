@@ -24,16 +24,16 @@ const headerLink = z.object({
 
 const configSchema = z.object({
   port: z.number().int().default(8080),
-  /** Read the visitor's IP from X-Forwarded-For (only behind your own proxy). */
+  /**
+   * Read the visitor's IP from `ipHeader` (only behind your own proxy): the last address in it, the
+   * one your proxy added, so a visitor can't pick their own by sending the header themselves.
+   */
   trustProxy: z.boolean().default(false),
+  /** The header your proxy puts the visitor's IP in, e.g. `cf-connecting-ip` behind Cloudflare. */
+  ipHeader: z.string().toLowerCase().default('x-forwarded-for'),
   /** Messages older than this many days are deleted once a day. Unset: chats are kept forever. */
   retentionDays: z.number().int().positive().optional(),
 
-  /**
-   * Where chats are kept (with DATABASE_URL): one table, one row per message, with the columns in
-   * docs/storage.md. Created if missing; an existing table with those columns (e.g. your app's own
-   * WhatsApp log) is shared as it is, so your app and agentdesk see the same conversations.
-   */
   /** Errors to Sentry (optional): the project's DSN, e.g. "${SENTRY_DSN}". */
   sentry: z
     .object({
@@ -42,6 +42,11 @@ const configSchema = z.object({
     })
     .optional(),
 
+  /**
+   * Where chats are kept (with DATABASE_URL): one table, one row per message, with the columns in
+   * docs/storage.md. Created if missing; an existing table with those columns (e.g. your app's own
+   * WhatsApp log) is shared as it is, so your app and agentdesk see the same conversations.
+   */
   storage: z
     .object({
       table: z
@@ -135,6 +140,11 @@ const configSchema = z.object({
       maxMinutes: z.number().positive().default(5),
       /** What the agent says first on a call. */
       greeting: z.string().optional(),
+      /**
+       * Tools the voice agent may use (default: all). Its tool calls come through the visitor's
+       * browser, so list only tools that are safe for anyone to call with any arguments.
+       */
+      tools: z.array(z.string()).optional(),
       wsUrl: z
         .string()
         .default(
@@ -195,6 +205,8 @@ const configSchema = z.object({
     .object({
       messagesPerConversation: limit(20, 10),
       messagesPerIp: limit(60, 10),
+      /** All website visitors together: your daily budget for typed replies. */
+      messagesPerDay: limit(3000, 24 * 60),
       voiceCallsPerConversation: limit(3, 60),
       voiceCallsPerIp: limit(6, 60),
       /** All visitors together: your daily voice budget. */

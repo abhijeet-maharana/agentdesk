@@ -12,7 +12,7 @@ import type { Audio } from '../src/whatsapp/audio.js';
 import { customerNote, splitBubbles, WhatsAppChat, whatsappKey } from '../src/whatsapp/chat.js';
 import { MetaClient, verifySignature } from '../src/whatsapp/meta.js';
 import { parseWebhook } from '../src/whatsapp/parse.js';
-import { eventually, fakeMcp, mockModel, text, toolCall } from './helpers.js';
+import { eventually, fakeMcp, gatedModel, mockModel, text, toolCall } from './helpers.js';
 
 const APP_SECRET = 'meta-app-secret';
 const IDENTITY_SECRET = 'test-secret-that-is-long-enough-123';
@@ -369,6 +369,32 @@ describe('WhatsApp channel', () => {
     expect(await relay.json()).toEqual({ received: 1 });
     await eventually(() => graph.sent.length === 1);
     expect((await rows())[0]).toMatchObject({ role: 'assistant', data: { context: true, ref: 'n-1' } });
+  });
+
+  it("describes a photo Claude can't view instead of failing every reply", async () => {
+    const model = mockModel([text('Could you send it as a screenshot?')]);
+    const { whatsappChat, graph } = setup([]);
+    (whatsappChat as unknown as { deps: { model: unknown } }).deps.model = model;
+    await whatsappChat.receive(webhook({ type: 'image', image: { id: 'media-3', mime_type: 'image/heic' } }));
+    await eventually(() => graph.sent.length === 1);
+    const prompt = JSON.stringify(model.doGenerateCalls[0]?.prompt);
+    expect(prompt).toContain("image/heic image you can't view");
+    expect(prompt).not.toContain('"type":"file"');
+  });
+
+  it('drops the reply being written when the team replies', async () => {
+    const { app, whatsappChat, graph } = setup([]);
+    const gated = gatedModel(text('Late AI answer'));
+    (whatsappChat as unknown as { deps: { model: unknown } }).deps.model = gated.model;
+    await whatsappChat.receive(webhook({ type: 'text', text: { body: 'hello?' } }));
+    await app.request(`/v1/admin/conversations/${whatsappKey(PHONE)}/messages`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Ravi here.' }),
+    });
+    gated.release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(graph.sent.map((m) => (m.text as { body: string }).body)).toEqual(['Ravi here.']);
   });
 
   it('sends team replies from the admin API on WhatsApp', async () => {

@@ -19,6 +19,9 @@ import { WhatsAppChat } from './whatsapp/chat.js';
 import { MetaClient } from './whatsapp/meta.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// On shutdown, replies already being written get this long to finish (docker stop waits 30 s
+// with the compose files' stop_grace_period).
+const DRAIN_MS = 25_000;
 
 export interface StartOptions {
   /** The config file; defaults to AGENTDESK_CONFIG or agentdesk.config.yaml. */
@@ -59,13 +62,14 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
 
   const stopCleanup = config.retentionDays ? startCleanup(store, config.retentionDays, log) : () => {};
 
+  // One state for both channels: they never share a conversation key.
+  const state = new ChatState();
   const shared = {
     config,
     secrets,
     ownPrompt: basePrompt,
     store,
-    // One state for both channels: they never share a conversation key.
-    state: new ChatState(),
+    state,
     tools,
     mcp,
     model: options.model ?? anthropic(config.agent.model),
@@ -106,6 +110,12 @@ export async function startAgentdesk(options: StartOptions = {}): Promise<Agentd
     close: async () => {
       stopCleanup();
       server.close();
+      // Let replies being written finish, so a deploy doesn't leave customers without an answer.
+      const unfinished = await state.drain(DRAIN_MS);
+      if (unfinished.length) {
+        log.warn(`Shutting down with ${unfinished.length} unfinished replies`);
+        await chat.interrupted(unfinished);
+      }
       await Promise.allSettled([store.close(), mcp?.close(), flushSentry()]);
     },
   };

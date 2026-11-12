@@ -16,11 +16,11 @@
   "linter": { "enabled": true, "rules": { "preset": "recommended" } },
   "overrides": [
     {
-      "includes": ["widget/src/icons.tsx"],
+      "includes": ["widget/src/icons.tsx", "widget/src/inbox/icons.tsx"],
       "linter": { "rules": { "a11y": { "noSvgWithoutTitle": "off" } } }
     },
     {
-      "includes": ["widget/src/*.css"],
+      "includes": ["widget/src/**/*.css"],
       "linter": { "rules": { "style": { "noDescendingSpecificity": "off" } } }
     },
     {

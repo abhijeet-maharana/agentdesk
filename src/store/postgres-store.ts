@@ -100,43 +100,50 @@ export class PostgresStore implements Store {
         paused_until: string | null;
       }[]
     >`
-      with stats as (
-        select phone_number,
-               count(*) filter (where role in ('user', 'assistant') and message <> '') as messages,
-               count(*) filter (where role = 'user' and coalesce(is_read, false) = false) as unread,
-               coalesce(bool_or(is_starred), false) as starred,
-               max(created_at) filter (where role = 'user') as last_customer_at
-        from ${t}
-        group by phone_number
-      ),
-      latest as (
-        select distinct on (phone_number) phone_number, role, message, created_at
+      -- The newest chats first, filtered, then the counts for just that page (not the whole table).
+      with latest as (
+        select distinct on (phone_number) id, phone_number, role, message, created_at
         from ${t}
         where role in ('user', 'assistant') and message <> ''
         order by phone_number, created_at desc, id desc
+      ),
+      page as (
+        select l.* from latest l
+        where true
+          ${query.before ? sql`and l.created_at < ${new Date(query.before)}` : sql``}
+          ${query.channel === 'web' ? sql`and l.phone_number like 'web:%'` : sql``}
+          ${query.channel === 'whatsapp' ? sql`and l.phone_number not like '%:%'` : sql``}
+          ${
+            query.starredOnly
+              ? sql`and exists (select 1 from ${t} st where st.phone_number = l.phone_number and st.is_starred)`
+              : sql``
+          }
+          ${
+            search
+              ? sql`and (l.phone_number ilike ${search} or exists (
+                  select 1 from ${t} x where x.phone_number = l.phone_number and x.message ilike ${search}))`
+              : sql``
+          }
+        order by l.created_at desc
+        limit ${query.limit}
       )
-      select l.phone_number, l.role, l.message, l.created_at, s.messages, s.unread, s.starred, s.last_customer_at,
+      select p.phone_number, p.role, p.message, p.created_at, s.messages, s.unread, s.starred, s.last_customer_at,
              (select metadata->>'profile_name' from ${t} n
-               where n.phone_number = l.phone_number and n.metadata ? 'profile_name'
+               where n.phone_number = p.phone_number and n.metadata ? 'profile_name'
                order by n.created_at desc limit 1) as name,
-             (select metadata->>'paused_until' from ${t} p
-               where p.phone_number = l.phone_number and p.role = 'system' and p.metadata ? 'paused_until'
-               order by p.created_at desc limit 1) as paused_until
-      from latest l
-      join stats s on s.phone_number = l.phone_number
-      where true
-        ${query.before ? sql`and l.created_at < ${new Date(query.before)}` : sql``}
-        ${query.channel === 'web' ? sql`and l.phone_number like 'web:%'` : sql``}
-        ${query.channel === 'whatsapp' ? sql`and l.phone_number not like '%:%'` : sql``}
-        ${query.starredOnly ? sql`and s.starred` : sql``}
-        ${
-          search
-            ? sql`and (l.phone_number ilike ${search} or exists (
-                select 1 from ${t} x where x.phone_number = l.phone_number and x.message ilike ${search}))`
-            : sql``
-        }
-      order by l.created_at desc
-      limit ${query.limit}`;
+             (select metadata->>'paused_until' from ${t} q
+               where q.phone_number = p.phone_number and q.role = 'system' and q.metadata ? 'paused_until'
+               order by q.created_at desc limit 1) as paused_until
+      from page p
+      cross join lateral (
+        select count(*) filter (where role in ('user', 'assistant') and message <> '') as messages,
+               count(*) filter (where role = 'user' and coalesce(is_read, false) = false) as unread,
+               coalesce(bool_or(is_starred), false) as starred,
+               max(created_at) filter (where role = 'user') as last_customer_at
+        from ${t} c
+        where c.phone_number = p.phone_number
+      ) s
+      order by p.created_at desc`;
     return rows.map((r) => ({
       conversationId: conversationIdOf(r.phone_number),
       channel: channelOf(r.phone_number),

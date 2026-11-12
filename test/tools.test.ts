@@ -87,6 +87,17 @@ describe('ToolRunner', () => {
 });
 
 describe('helpers', () => {
+  it('parseCards drops cards whose link or image is not http(s)', () => {
+    const cards = parseCards({
+      cards: [
+        { id: 'a', title: 'A', url: 'javascript:alert(1)' },
+        { id: 'b', title: 'B', url: 'https://example.com/b', image: 'data:image/png;base64,AAAA' },
+        { id: 'c', title: 'C', url: 'https://example.com/c' },
+      ],
+    });
+    expect(cards.map((c) => c.id)).toEqual(['c']);
+  });
+
   it('parseCards ignores anything that is not a card list', () => {
     expect(parseCards(undefined)).toEqual([]);
     expect(parseCards({ cards: 'no' })).toEqual([]);

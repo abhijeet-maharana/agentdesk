@@ -7,8 +7,8 @@ import { silentLogger } from '../src/logger.js';
 import { createApp } from '../src/server.js';
 import { ChatState } from '../src/state.js';
 import { MemoryStore } from '../src/store/memory-store.js';
-import { WebChat } from '../src/web/chat.js';
-import { eventually, fakeMcp, mockModel, text, toolCall } from './helpers.js';
+import { INTERRUPTED_REPLY, WebChat } from '../src/web/chat.js';
+import { eventually, fakeMcp, gatedModel, mockModel, text, toolCall } from './helpers.js';
 
 const SECRET = 'test-secret-that-is-long-enough-123';
 const ORIGIN = 'https://shop.example.com';
@@ -63,7 +63,7 @@ function setup(responses: Parameters<typeof mockModel>[0], overrides: Record<str
     });
   const load = async () =>
     (await (await app.request(base)).json()) as { messages: Array<Record<string, unknown>>; busy: boolean };
-  return { app, store, calls, fetchImpl, alert, id, base, post, load };
+  return { app, store, calls, fetchImpl, alert, id, base, post, load, chat, config };
 }
 
 describe('website chat API', () => {
@@ -209,5 +209,132 @@ describe('admin API', () => {
       team: true,
       text: 'This is Priya from the team.',
     });
+  });
+});
+
+describe('hardening', () => {
+  const admin = { authorization: 'Bearer admin-token', 'content-type': 'application/json' };
+  const useModel = (chat: WebChat, model: unknown) => {
+    (chat as unknown as { deps: { model: unknown } }).deps.model = model;
+  };
+
+  it('drops the reply being written when the team pauses the chat', async () => {
+    const { app, post, load, id, chat } = setup([]);
+    const gated = gatedModel(text('Late AI answer'));
+    useModel(chat, gated.model);
+    await post('/messages', { text: 'Hello?' });
+    expect((await load()).busy).toBe(true);
+
+    await app.request(`/v1/admin/conversations/web:${id}/pause`, {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({ hours: 1 }),
+    });
+    expect((await load()).busy).toBe(false);
+    gated.release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await load()).messages.map((m) => m.text)).toEqual(['Hello?']);
+  });
+
+  it('drops the reply being written when the team replies', async () => {
+    const { app, post, load, id, chat } = setup([]);
+    const gated = gatedModel(text('Late AI answer'));
+    useModel(chat, gated.model);
+    await post('/messages', { text: 'Hello?' });
+    await app.request(`/v1/admin/conversations/web:${id}/messages`, {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({ text: 'Ravi here.' }),
+    });
+    gated.release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await load()).messages.map((m) => m.text)).toEqual(['Hello?', 'Ravi here.']);
+  });
+
+  it('says so in the chat when a shutdown cuts a reply short', async () => {
+    const { post, load, id, chat } = setup([]);
+    const gated = gatedModel(text('Too late'));
+    useModel(chat, gated.model);
+    await post('/messages', { text: 'Hello?' });
+    const state = (chat as unknown as { deps: { state: ChatState } }).deps.state;
+    const unfinished = await state.drain(20);
+    expect(unfinished).toEqual([`web:${id}`]);
+    await chat.interrupted(unfinished);
+    gated.release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await load()).messages.map((m) => m.text)).toEqual(['Hello?', INTERRUPTED_REPLY]);
+  });
+
+  it("saves a call transcript once and runs only the call's own tools", async () => {
+    const { post } = setup([], { voice: { maxMinutes: 2, tools: ['list_products'] } });
+    const call = (await (await post('/voice', {})).json()) as { sessionId: string };
+    expect(
+      (await post(`/voice/${call.sessionId}/tools`, { name: 'secret_admin_tool', args: {} })).status,
+    ).toBe(403);
+    const turns = { turns: [{ role: 'assistant', text: 'Refund approved.' }] };
+    expect((await post(`/voice/${call.sessionId}/transcript`, turns)).status).toBe(200);
+    expect((await post(`/voice/${call.sessionId}/transcript`, turns)).status).toBe(403);
+  });
+
+  it('tells the agent which lines came from a call transcript', async () => {
+    const model = mockModel([text('Let me check that.')]);
+    const { post, chat, load } = setup([]);
+    useModel(chat, model);
+    const call = (await (await post('/voice', {})).json()) as { sessionId: string };
+    await post(`/voice/${call.sessionId}/transcript`, {
+      turns: [{ role: 'assistant', text: 'Refund approved.' }],
+    });
+    await post('/messages', { text: 'So where is my refund?' });
+    await eventually(async () => (await load()).messages.length === 3);
+    expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).toContain('[Voice call] Refund approved.');
+  });
+
+  it('caps typed replies per day across all visitors', async () => {
+    const { app } = setup([text('a'), text('b')], {
+      limits: { messagesPerDay: { max: 1, perMinutes: 1440 } },
+    });
+    const send = (id: string) =>
+      app.request(`/v1/web/conversations/${id}/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ text: 'hi' }),
+      });
+    expect((await send(randomUUID())).status).toBe(200);
+    expect((await send(randomUUID())).status).toBe(429);
+  });
+
+  it("rate-limits on the proxy's address, not one the visitor sends", async () => {
+    const { app } = setup([text('a'), text('b')], {
+      trustProxy: true,
+      limits: { messagesPerIp: { max: 1, perMinutes: 10 } },
+    });
+    const send = (forwarded: string) =>
+      app.request(`/v1/web/conversations/${randomUUID()}/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-forwarded-for': forwarded },
+        body: JSON.stringify({ text: 'hi' }),
+      });
+    expect((await send('1.1.1.1, 9.9.9.9')).status).toBe(200);
+    expect((await send('2.2.2.2, 9.9.9.9')).status).toBe(429);
+  });
+
+  it('keeps server-only admin calls away from staff tokens', async () => {
+    const { app, id } = setup([]);
+    const staff = await new SignJWT({ role: 'agent' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject('s1')
+      .setAudience('agentdesk-inbox')
+      .setExpirationTime('1h')
+      .sign(new TextEncoder().encode(SECRET));
+    const context = await app.request(`/v1/admin/conversations/web:${id}/context`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${staff}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'hi' }),
+    });
+    expect(context.status).toBe(403);
+    const list = await app.request('/v1/admin/conversations', {
+      headers: { authorization: `Bearer ${staff}` },
+    });
+    expect(list.status).toBe(200);
   });
 });

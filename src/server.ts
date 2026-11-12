@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { type Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
 import type { Config, Secrets } from './config.js';
@@ -74,6 +75,9 @@ export interface ServerDeps {
 export function createApp(deps: ServerDeps): Hono {
   const { config, secrets, chat, store, whatsapp } = deps;
   const app = new Hono();
+  /** Stops the reply the agent is writing in this chat, if any. */
+  const stopReply = (key: string) =>
+    key.startsWith(`${WHATSAPP}:`) ? whatsapp?.cancelReply(key) : chat.cancelReply(key);
 
   app.onError((error, c) => {
     if (error instanceof ChatError) return c.json({ error: error.message }, error.status);
@@ -87,6 +91,12 @@ export function createApp(deps: ServerDeps): Hono {
   });
 
   app.get('/healthz', (c) => c.json({ ok: true }));
+
+  // Every API body is small (a call transcript is the largest); refuse anything bigger before reading it.
+  app.use(
+    '/v1/*',
+    bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'Request too large.' }, 413) }),
+  );
 
   // The bundles: widget.js for your site's visitors, inbox.js for your team (built next to each other).
   const bundles = new Map<string, string | null>();
@@ -122,7 +132,8 @@ export function createApp(deps: ServerDeps): Hono {
   const identityOf = (c: Context) => verifyIdentity(c.req.header('authorization'), secrets.identitySecret);
   const ipOf = (c: Context): string => {
     if (config.trustProxy) {
-      const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+      // The last address is the one your proxy added; earlier ones are whatever the visitor sent.
+      const forwarded = c.req.header(config.ipHeader)?.split(',').at(-1)?.trim();
       if (forwarded) return forwarded;
     }
     try {
@@ -202,10 +213,16 @@ export function createApp(deps: ServerDeps): Hono {
       maxAge: 600,
     }),
   );
+  const bearer = (c: Context) => c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? '';
+  const isAdminToken = (c: Context) =>
+    Boolean(secrets.adminToken) && safeEqual(bearer(c), secrets.adminToken ?? '');
+  /** For calls only your server makes (ADMIN_TOKEN), never a staff token from the browser. */
+  const requireAdminToken = (c: Context) => {
+    if (!isAdminToken(c)) throw new ChatError(403, 'This call needs ADMIN_TOKEN.');
+  };
   app.use('/v1/admin/*', async (c, next) => {
-    const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? '';
-    if (secrets.adminToken && safeEqual(token, secrets.adminToken)) return next();
-    const staff = await verifyStaff(token, secrets.identitySecret);
+    if (isAdminToken(c)) return next();
+    const staff = await verifyStaff(bearer(c), secrets.identitySecret);
     if (!staff) return c.json({ error: 'Unauthorized' }, 401);
     if (staff.role === 'viewer' && c.req.method !== 'GET') return c.json({ error: 'Read-only access' }, 403);
     await next();
@@ -269,8 +286,11 @@ export function createApp(deps: ServerDeps): Hono {
 
   /** A message your own app sent the customer (a notification, a code): the agent reads it, nothing is sent. */
   app.post('/v1/admin/conversations/:key/context', async (c) => {
+    requireAdminToken(c);
     const { text, ref } = contextBody.parse(await c.req.json());
     const key = c.req.param('key');
+    // The customer just got this from your app: a reply the agent was writing would talk over it.
+    stopReply(key);
     const channel = key.split(':')[0] ?? '';
     const message = await store.add({
       conversationId: key,
@@ -286,7 +306,9 @@ export function createApp(deps: ServerDeps): Hono {
   app.post('/v1/admin/conversations/:key/pause', async (c) => {
     const { hours } = pauseBody.parse(await c.req.json());
     const until = new Date(Date.now() + hours * 60 * 60_000);
-    await store.setPausedUntil(c.req.param('key'), until);
+    const key = c.req.param('key');
+    await store.setPausedUntil(key, until);
+    stopReply(key);
     return c.json({ pausedUntil: until.toISOString() });
   });
 
@@ -315,6 +337,7 @@ export function createApp(deps: ServerDeps): Hono {
    * already wrote to the shared chat table (storage.table).
    */
   app.post('/v1/admin/whatsapp/webhook', async (c) => {
+    requireAdminToken(c);
     if (!whatsapp) throw new ChatError(404, 'WhatsApp is not configured.');
     const reply = c.req.query('reply') !== 'false';
     const stored = c.req.query('stored') === 'true';

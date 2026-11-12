@@ -52,13 +52,15 @@ A visitor's identity token is never accepted as a staff token, nor the other way
 | `onSend(conversation, text)` | Sends team replies your way (e.g. a template when WhatsApp's 24-hour window is closed). Default: agentdesk sends it |
 | `actions: [{ label, run(conversation) }]` | Buttons in the chat header, e.g. "Send catalog" |
 | `panel(conversation, element)` | Your side panel for the open chat (customer details, tickets). Draw into `element` with anything you like; it lives in your page, so your CSS applies. Return a cleanup function if you need one |
-| `theme: { bg, surface, border, text, muted, accent, … }` | Colours (`--ib-*` in [inbox.css](../widget/src/inbox/inbox.css)), e.g. to match a dark admin |
+| `theme: { bg, surface, border, text, muted, accent, link, radius, … }` | Colours and corners (`--ib-*` in [inbox.css](../widget/src/inbox/inbox.css)), e.g. to match a dark admin. `link` defaults to `accent`; set it lighter when `accent` is dark |
 | `conversation: "whatsapp:9198…"` | Open this chat first |
 
 ## What the inbox shows
 
-- **List:** newest first, unread count (the customer's messages since your team last opened the chat), star, ⏸ while the agent is paused. Search covers the number or id and every message. Filters: starred, channel.
-- **Chat:** customer messages, the agent's replies (with cards), team replies, messages your app sent (`context`), every tool call with its input and raw result, photos and voice notes (through `/v1/admin/media/:id`), and WhatsApp's 24-hour window.
-- **Actions:** reply, quick replies, Pause / Resume the agent (12 hours), star. Opening a chat marks it read.
+- **List:** newest first, unread count (the customer's messages since your team last opened the chat), star, and an "AI paused until …" tag. Search covers the number or id and every message. Filters: unread, AI paused, starred, channel.
+- **Chat:** customer messages, the agent's replies (with cards), team replies, messages your app sent (`context`), photos and voice notes (through `/v1/admin/media/:id`), and how long WhatsApp's 24-hour window has left. Each run of tool calls is one line that opens to every input and raw result; hide them all with the tool button (remembered per browser).
+- **AI status:** a bar under the chat header says whether the agent answers this chat. Only your team changes it: **Pause AI** (1 hour, 12 hours, 24 hours or 7 days) and **Resume AI**. Opening a chat never pauses it.
+- **Actions:** reply, quick replies, star, your `actions`. Opening a chat marks it read.
+- **Phones:** below 760 px wide (the inbox's own width) it shows the list or one chat, header actions move into a ⋮ menu, and your panel opens as a full-screen sheet from **Customer details**. Between 760 and 1100 px the panel is a drawer over the chat.
 
 Polls every 10 s (list) and 5 s (open chat).

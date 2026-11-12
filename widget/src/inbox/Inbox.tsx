@@ -1,11 +1,47 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { formatText } from '../format';
+import { CloseIcon, SendIcon } from '../icons';
 import type { InboxApi, InboxConfig, InboxConversation, InboxMessage, ListQuery } from './api';
+import {
+  AppIcon,
+  BackIcon,
+  ChatsIcon,
+  DownIcon,
+  FileIcon,
+  GlobeIcon,
+  MoreIcon,
+  PauseIcon,
+  PersonIcon,
+  PlayIcon,
+  SearchIcon,
+  SparkIcon,
+  StarIcon,
+  ToolIcon,
+  WaGlyph,
+} from './icons';
 
 const LIST_EVERY_MS = 10_000;
 const THREAD_EVERY_MS = 5_000;
-const DAY_MS = 24 * 60 * 60_000;
-const PAUSE_HOURS = 12;
+const HOUR_MS = 60 * 60_000;
+const DAY_MS = 24 * HOUR_MS;
+const PAGE_SIZE = 40;
+/** Pause lengths offered in the "Pause AI" menu, in hours. */
+const PAUSE_OPTIONS: Array<{ hours: number; label: string }> = [
+  { hours: 1, label: 'For 1 hour' },
+  { hours: 12, label: 'For 12 hours' },
+  { hours: 24, label: 'For 24 hours' },
+  { hours: 24 * 7, label: 'For 7 days' },
+];
+const TOOLS_PREF = 'agentdesk-inbox-show-tools';
 
 /** A button your app adds to the chat header, e.g. "Send catalog". */
 export interface InboxAction {
@@ -24,32 +60,37 @@ export interface InboxProps {
   initialConversation?: string;
 }
 
+type View = 'all' | 'unread' | 'paused';
+
 export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialConversation }: InboxProps) {
   const [config, setConfig] = useState<InboxConfig | null>(null);
   const [query, setQuery] = useState<ListQuery>({});
+  const [view, setView] = useState<View>('all');
   const [search, setSearch] = useState('');
-  const [list, setList] = useState<InboxConversation[]>([]);
+  const [list, setList] = useState<InboxConversation[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(initialConversation ?? null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [showTools, setShowTools] = useState(() => readPref(TOOLS_PREF) !== 'false');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.config().then(setConfig, (e: Error) => setError(e.message));
   }, [api]);
 
-  // The list refreshes in place; "Load older" appends pages.
+  // The list refreshes in place; "Load older chats" appends pages.
   const refresh = useCallback(async () => {
     try {
-      const fresh = await api.list(query);
+      const fresh = await api.list(query, PAGE_SIZE);
       setList((old) => {
-        const older = old.filter(
+        const older = (old ?? []).filter(
           (c) =>
             !fresh.some((f) => f.conversationId === c.conversationId) &&
             c.lastAt < (fresh.at(-1)?.lastAt ?? ''),
         );
         return [...fresh, ...older];
       });
-      setHasMore((h) => h || fresh.length === 40);
+      setHasMore((h) => h || fresh.length === PAGE_SIZE);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -57,7 +98,7 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
   }, [api, query]);
 
   useEffect(() => {
-    setList([]);
+    setList(null);
     setHasMore(false);
     void refresh();
     const timer = setInterval(() => void refresh(), LIST_EVERY_MS);
@@ -65,14 +106,18 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
   }, [refresh]);
 
   const loadOlder = async () => {
-    const before = list.at(-1)?.lastAt;
+    const before = list?.at(-1)?.lastAt;
     if (!before) return;
-    const page = await api.list({ ...query, before });
-    setList((old) => [
-      ...old,
-      ...page.filter((p) => !old.some((o) => o.conversationId === p.conversationId)),
-    ]);
-    setHasMore(page.length === 40);
+    try {
+      const page = await api.list({ ...query, before }, PAGE_SIZE);
+      setList((old) => [
+        ...(old ?? []),
+        ...page.filter((p) => !(old ?? []).some((o) => o.conversationId === p.conversationId)),
+      ]);
+      setHasMore(page.length === PAGE_SIZE);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   // Search after a short pause in typing.
@@ -83,7 +128,7 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
 
   const selected = useMemo(
     () =>
-      list.find((c) => c.conversationId === selectedKey) ??
+      list?.find((c) => c.conversationId === selectedKey) ??
       (selectedKey ? placeholderConversation(selectedKey) : null),
     [list, selectedKey],
   );
@@ -92,35 +137,65 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
     onSelect?.(selected);
   }, [selected?.conversationId, onSelect]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const toggleTools = () =>
+    setShowTools((on) => {
+      writePref(TOOLS_PREF, String(!on));
+      return !on;
+    });
+
+  const shown = (list ?? []).filter((c) =>
+    view === 'unread' ? c.unread > 0 : view === 'paused' ? Boolean(c.pausedUntil) : true,
+  );
+  const unreadChats = (list ?? []).filter((c) => c.unread > 0).length;
+  const channels = config?.channels ?? [];
+
   return (
-    <div className={`ib ${selected ? 'ib--open' : ''} ${hasPanel ? 'ib--panel' : ''}`}>
-      <aside className="ib-list">
+    <div
+      className={[
+        'ib',
+        selected ? 'ib--open' : '',
+        hasPanel ? 'ib--panel' : '',
+        hasPanel && panelOpen ? 'ib--panel-open' : '',
+      ].join(' ')}
+    >
+      <aside className="ib-list" aria-label="Chats">
         <div className="ib-list-head">
-          <p className="ib-title">{config?.title ?? 'Inbox'}</p>
-          <input
-            className="ib-search"
-            type="search"
-            placeholder="Search number, id or text"
-            aria-label="Search chats"
-            value={search}
-            onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
-          />
+          <h1 className="ib-title">{config?.title ?? 'Inbox'}</h1>
+          <label className="ib-search">
+            <SearchIcon />
+            <span className="ib-sr">Search chats</span>
+            <input
+              type="search"
+              placeholder="Search name, number or message"
+              value={search}
+              onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
+            />
+          </label>
           <fieldset className="ib-filters">
-            <legend className="ib-sr">Filter chats</legend>
+            <legend className="ib-sr">Show</legend>
             <Filter
-              active={!query.starred && !query.channel}
-              onClick={() => setQuery((q) => ({ search: q.search }))}
+              active={view === 'all' && !query.starred}
+              onClick={() => {
+                setView('all');
+                setQuery((q) => ({ ...q, starred: undefined }));
+              }}
             >
               All
             </Filter>
+            <Filter active={view === 'unread'} onClick={() => setView(view === 'unread' ? 'all' : 'unread')}>
+              Unread{unreadChats > 0 && <span className="ib-filter-count">{unreadChats}</span>}
+            </Filter>
+            <Filter active={view === 'paused'} onClick={() => setView(view === 'paused' ? 'all' : 'paused')}>
+              AI paused
+            </Filter>
             <Filter
               active={Boolean(query.starred)}
-              onClick={() => setQuery((q) => ({ ...q, starred: !q.starred }))}
+              onClick={() => setQuery((q) => ({ ...q, starred: q.starred ? undefined : true }))}
             >
-              ★ Starred
+              Starred
             </Filter>
-            {(config?.channels.length ?? 0) > 1 &&
-              config?.channels.map((ch) => (
+            {channels.length > 1 &&
+              channels.map((ch) => (
                 <Filter
                   key={ch}
                   active={query.channel === ch}
@@ -131,56 +206,44 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
               ))}
           </fieldset>
         </div>
-        {error && <p className="ib-error">{error}</p>}
+        {error && (
+          <p className="ib-alert" role="alert">
+            {error}
+          </p>
+        )}
         <ul className="ib-items">
-          {list.map((c) => (
+          {shown.map((c) => (
             <li key={c.conversationId}>
-              <button
-                type="button"
-                className={`ib-item ${c.conversationId === selectedKey ? 'ib-item--active' : ''}`}
-                onClick={() => setSelectedKey(c.conversationId)}
-              >
-                <span className={`ib-avatar ib-avatar--${c.channel}`} aria-hidden>
-                  {initials(c)}
-                </span>
-                <span className="ib-item-body">
-                  <span className="ib-item-top">
-                    <span className="ib-item-name">{displayName(c)}</span>
-                    <span className="ib-item-time">{shortTime(c.lastAt)}</span>
-                  </span>
-                  <span className="ib-item-bottom">
-                    <span className="ib-item-preview">
-                      {c.lastRole === 'assistant' ? '↩ ' : ''}
-                      {c.lastMessage.replace(/\*/g, '') || '…'}
-                    </span>
-                    {c.starred && (
-                      <span className="ib-star" title="Starred">
-                        ★
-                      </span>
-                    )}
-                    {c.pausedUntil && (
-                      <span className="ib-paused" title="AI paused">
-                        ⏸
-                      </span>
-                    )}
-                    {c.unread > 0 && <span className="ib-badge">{c.unread}</span>}
-                  </span>
-                </span>
-              </button>
+              <ListItem
+                conversation={c}
+                active={c.conversationId === selectedKey}
+                onOpen={() => setSelectedKey(c.conversationId)}
+              />
             </li>
           ))}
+          {list === null && !error && <li className="ib-empty">Loading chats…</li>}
+          {list !== null && shown.length === 0 && (
+            <li className="ib-empty">
+              {query.search
+                ? `No chats match “${query.search}”.`
+                : view === 'unread'
+                  ? 'No unread chats.'
+                  : view === 'paused'
+                    ? 'The AI is answering every chat.'
+                    : query.starred
+                      ? 'No starred chats. Star a chat to keep it here.'
+                      : 'No chats yet. They show up here as soon as a customer writes.'}
+            </li>
+          )}
         </ul>
-        {hasMore && list.length > 0 && (
+        {hasMore && shown.length > 0 && (
           <button type="button" className="ib-more" onClick={() => void loadOlder()}>
             Load older chats
           </button>
         )}
-        {!error && list.length === 0 && (
-          <p className="ib-empty">No chats{query.search ? ' match' : ' yet'}.</p>
-        )}
       </aside>
 
-      <section className="ib-thread">
+      <section className="ib-thread" aria-label="Conversation">
         {selected && config ? (
           <Thread
             key={selected.conversationId}
@@ -189,20 +252,125 @@ export function Inbox({ api, onSend, actions = [], onSelect, hasPanel, initialCo
             conversation={selected}
             actions={actions}
             onSend={onSend}
-            onBack={() => setSelectedKey(null)}
+            hasPanel={Boolean(hasPanel)}
+            showTools={showTools}
+            onToggleTools={toggleTools}
+            onOpenPanel={() => setPanelOpen(true)}
+            onBack={() => {
+              setPanelOpen(false);
+              setSelectedKey(null);
+            }}
             onChanged={() => void refresh()}
           />
         ) : (
-          <p className="ib-empty ib-empty--thread">Pick a chat.</p>
+          <div className="ib-placeholder">
+            <ChatsIcon />
+            <p>Select a chat to read it and reply.</p>
+          </div>
         )}
       </section>
 
       {hasPanel && (
-        <aside className="ib-panel">
-          <slot name="panel" />
-        </aside>
+        <>
+          <button
+            type="button"
+            className="ib-scrim"
+            aria-label="Close customer details"
+            tabIndex={-1}
+            onClick={() => setPanelOpen(false)}
+          />
+          <Drawer open={panelOpen} onClose={() => setPanelOpen(false)} />
+        </>
       )}
     </div>
+  );
+}
+
+/** Your panel: a column on wide screens, a drawer over the chat on narrow ones. */
+function Drawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    close.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  return (
+    <aside className="ib-panel" aria-label="Customer details">
+      <div className="ib-panel-head">
+        <h2>Customer details</h2>
+        <button ref={close} type="button" className="ib-icon-btn" aria-label="Close" onClick={onClose}>
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="ib-panel-body">
+        <slot name="panel" />
+      </div>
+    </aside>
+  );
+}
+
+function ListItem({
+  conversation: c,
+  active,
+  onOpen,
+}: {
+  conversation: InboxConversation;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  const { name } = who(c);
+  const preview = c.lastMessage.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+  return (
+    <button
+      type="button"
+      className={`ib-item${active ? ' ib-item--active' : ''}${c.unread > 0 ? ' ib-item--unread' : ''}`}
+      aria-current={active ? 'true' : undefined}
+      onClick={onOpen}
+    >
+      <Avatar conversation={c} />
+      <span className="ib-item-body">
+        <span className="ib-item-row">
+          <span className="ib-item-name">{name}</span>
+          <time className="ib-item-time" dateTime={c.lastAt}>
+            {listTime(c.lastAt)}
+          </time>
+        </span>
+        <span className="ib-item-row">
+          <span className="ib-item-preview">
+            {c.lastRole !== 'user' && <span className="ib-item-you">Replied: </span>}
+            {preview || 'Photo or file'}
+          </span>
+          {c.starred && <StarIcon filled className="ib-item-star" label="Starred" />}
+          {c.unread > 0 && (
+            <span className="ib-badge" title={`${c.unread} unread`}>
+              {c.unread}
+              <span className="ib-sr"> unread</span>
+            </span>
+          )}
+        </span>
+        {c.pausedUntil && (
+          <span className="ib-item-paused">
+            <PauseIcon />
+            AI paused until {untilLabel(c.pausedUntil)}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+function Avatar({ conversation: c, large }: { conversation: InboxConversation; large?: boolean }) {
+  return (
+    <span className={`ib-avatar${large ? ' ib-avatar--large' : ''}`} aria-hidden>
+      {initials(c) ?? <PersonIcon />}
+      <span className={`ib-avatar-channel ib-avatar-channel--${c.channel}`}>
+        {c.channel === 'whatsapp' ? <WaGlyph /> : <GlobeIcon />}
+      </span>
+    </span>
   );
 }
 
@@ -212,6 +380,10 @@ function Thread({
   conversation,
   actions,
   onSend,
+  hasPanel,
+  showTools,
+  onToggleTools,
+  onOpenPanel,
   onBack,
   onChanged,
 }: {
@@ -220,17 +392,26 @@ function Thread({
   conversation: InboxConversation;
   actions: InboxAction[];
   onSend?: InboxProps['onSend'];
+  hasPanel: boolean;
+  showTools: boolean;
+  onToggleTools: () => void;
+  onOpenPanel: () => void;
   onBack: () => void;
   onChanged: () => void;
 }) {
   const key = conversation.conversationId;
   const [messages, setMessages] = useState<InboxMessage[] | null>(null);
   const [pausedUntil, setPausedUntil] = useState<string | null>(conversation.pausedUntil);
+  const [starred, setStarred] = useState(conversation.starred);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const bottom = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const scroller = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const lastCount = useRef(0);
+
+  useEffect(() => setStarred(conversation.starred), [conversation.starred]);
 
   const load = useCallback(async () => {
     try {
@@ -248,17 +429,21 @@ function Thread({
     return () => clearInterval(timer);
   }, [load]);
 
-  // Opening a chat, or new messages arriving while it is open, marks it read.
-  useEffect(() => {
-    if (!messages) return;
-    if (messages.length !== lastCount.current) {
-      lastCount.current = messages.length;
-      bottom.current?.scrollIntoView({ block: 'end' });
-      if (conversation.unread > 0 || messages.at(-1)?.role === 'user') {
-        api.markRead(key).then(onChanged, () => {});
-      }
+  const scrollToEnd = () => {
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
+  // New messages: follow them if the reader is at the bottom (or just opened the chat), and mark read.
+  useLayoutEffect(() => {
+    if (!messages || messages.length === lastCount.current) return;
+    const first = lastCount.current === 0;
+    lastCount.current = messages.length;
+    if (first || atBottom) scrollToEnd();
+    if (conversation.unread > 0 || messages.at(-1)?.role === 'user') {
+      api.markRead(key).then(onChanged, () => {});
     }
-  }, [messages, api, key, conversation.unread, onChanged]);
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (label: string, task: () => Promise<unknown>) => {
     setBusy(label);
@@ -279,25 +464,61 @@ function Thread({
       if (onSend) await onSend(conversation, text);
       else await api.send(key, text);
       setDraft('');
+      if (input.current) input.current.style.height = '';
+      setAtBottom(true);
+      requestAnimationFrame(scrollToEnd);
+    });
+
+  const pause = (hours: number | null) => run('pause', () => api.pause(key, hours));
+  const toggleStar = () =>
+    run('star', async () => {
+      await api.star(key, !starred);
+      setStarred(!starred);
     });
 
   const lastCustomerAt =
     messages?.findLast((m) => m.role === 'user')?.createdAt ?? conversation.lastCustomerAt;
-  const windowOpen = Boolean(lastCustomerAt && Date.now() - new Date(lastCustomerAt).getTime() < DAY_MS);
+  const windowMs = lastCustomerAt ? DAY_MS - (Date.now() - new Date(lastCustomerAt).getTime()) : 0;
+  const isWhatsApp = conversation.channel === 'whatsapp';
+  const { name, detail } = who(conversation);
+  const items = useMemo(() => groupMessages(messages ?? []), [messages]);
+  const disabled = busy !== null;
+
+  const menuItems: MenuItem[] = [
+    {
+      label: starred ? 'Unstar chat' : 'Star chat',
+      onSelect: () => void toggleStar(),
+      disabled,
+    },
+    ...actions.map((a) => ({
+      label: a.label,
+      onSelect: () => void run(a.label, async () => a.run(conversation)),
+      disabled,
+    })),
+    { label: 'Show tool calls', checked: showTools, onSelect: onToggleTools },
+    ...(hasPanel ? [{ label: 'Customer details', onSelect: onOpenPanel }] : []),
+  ];
 
   return (
     <>
       <header className="ib-head">
-        <button type="button" className="ib-back" onClick={onBack} aria-label="Back to chats">
-          ←
+        <button type="button" className="ib-icon-btn ib-back" onClick={onBack} aria-label="Back to chats">
+          <BackIcon />
         </button>
+        <Avatar conversation={conversation} large />
         <div className="ib-head-who">
-          <p className="ib-head-name">{displayName(conversation)}</p>
+          <h2 className="ib-head-name">{name}</h2>
           <p className="ib-head-sub">
-            {channelLabel(conversation.channel)}
-            {conversation.channel === 'whatsapp' && (
-              <span className={`ib-pill ${windowOpen ? 'ib-pill--ok' : 'ib-pill--off'}`}>
-                {windowOpen ? '24h window open' : 'Window closed'}
+            <span className={`ib-channel ib-channel--${conversation.channel}`}>
+              {channelLabel(conversation.channel)}
+            </span>
+            {detail && <span className="ib-head-detail">{detail}</span>}
+            {isWhatsApp && (
+              <span
+                className={`ib-window ${windowMs > 0 ? 'ib-window--open' : 'ib-window--closed'}`}
+                title="WhatsApp only delivers free-form replies within 24 hours of the customer's last message"
+              >
+                {windowMs > 0 ? `Reply window: ${durationLeft(windowMs)} left` : 'Reply window closed'}
               </span>
             )}
           </p>
@@ -305,50 +526,106 @@ function Thread({
         <div className="ib-head-actions">
           <button
             type="button"
-            className={`ib-btn ${pausedUntil ? 'ib-btn--warn' : ''}`}
-            disabled={busy !== null}
-            title={
-              pausedUntil
-                ? 'Let the AI answer this chat again'
-                : 'Stop the AI answering while your team talks'
-            }
-            onClick={() => void run('pause', () => api.pause(key, pausedUntil ? null : PAUSE_HOURS))}
+            className={`ib-icon-btn${starred ? ' ib-icon-btn--star' : ''}`}
+            aria-pressed={starred}
+            aria-label={starred ? 'Unstar chat' : 'Star chat'}
+            title={starred ? 'Unstar' : 'Star'}
+            disabled={disabled}
+            onClick={() => void toggleStar()}
           >
-            {pausedUntil ? `AI paused until ${shortTime(pausedUntil)} · Resume` : 'AI on · Pause'}
+            <StarIcon filled={starred} />
           </button>
           <button
             type="button"
-            className="ib-btn ib-btn--icon"
-            aria-pressed={conversation.starred}
-            title={conversation.starred ? 'Unstar' : 'Star'}
-            disabled={busy !== null}
-            onClick={() => void run('star', () => api.star(key, !conversation.starred))}
+            className="ib-icon-btn"
+            aria-pressed={showTools}
+            aria-label="Show tool calls"
+            title={showTools ? 'Hide tool calls' : 'Show tool calls'}
+            onClick={onToggleTools}
           >
-            {conversation.starred ? '★' : '☆'}
+            <ToolIcon />
           </button>
           {actions.map((a) => (
             <button
               key={a.label}
               type="button"
               className="ib-btn"
-              disabled={busy !== null}
+              disabled={disabled}
               onClick={() => void run(a.label, async () => a.run(conversation))}
             >
-              {busy === a.label ? '…' : a.label}
+              {busy === a.label ? 'Working…' : a.label}
             </button>
           ))}
+          {hasPanel && (
+            <button type="button" className="ib-btn ib-details-btn" onClick={onOpenPanel}>
+              <PersonIcon />
+              Details
+            </button>
+          )}
         </div>
+        <Menu
+          className="ib-overflow"
+          label="More actions"
+          button={<MoreIcon />}
+          buttonClass="ib-icon-btn"
+          align="end"
+          items={menuItems}
+        />
       </header>
 
-      <div className="ib-messages">
-        {!messages && <p className="ib-empty">Loading…</p>}
-        {messages?.map((m, i) => (
-          <MessageRow key={m.id} api={api} config={config} message={m} previous={messages[i - 1]} />
-        ))}
-        <div ref={bottom} />
+      <AiStatus pausedUntil={pausedUntil} busy={busy === 'pause'} disabled={disabled} onPause={pause} />
+
+      <div className="ib-scroll">
+        <div
+          className="ib-messages"
+          ref={scroller}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+          }}
+        >
+          {!messages && <p className="ib-empty">Loading conversation…</p>}
+          {messages?.length === 0 && <p className="ib-empty">No messages in this chat yet.</p>}
+          {items.map((item, i) => {
+            const previous = items[i - 1];
+            const day = dayLabel(item.createdAt);
+            const newDay = !previous || dayLabel(previous.createdAt) !== day;
+            return (
+              <div key={item.id} className="ib-row">
+                {newDay && (
+                  <p className="ib-day">
+                    <span>{day}</span>
+                  </p>
+                )}
+                {item.type === 'tools' ? (
+                  showTools && <ToolGroup calls={item.calls} />
+                ) : (
+                  <MessageRow
+                    api={api}
+                    config={config}
+                    message={item.message}
+                    continues={!newDay && continues(previous, item)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {!atBottom && (
+          <button
+            type="button"
+            className="ib-jump"
+            onClick={() => {
+              scrollToEnd();
+              setAtBottom(true);
+            }}
+          >
+            <DownIcon />
+            Latest
+          </button>
+        )}
       </div>
 
-      {error && <p className="ib-error">{error}</p>}
       <form
         className="ib-composer"
         onSubmit={(e) => {
@@ -356,32 +633,69 @@ function Thread({
           if (draft.trim()) void send(draft.trim());
         }}
       >
+        {error && (
+          <p className="ib-alert" role="alert">
+            {error}
+            <button
+              type="button"
+              className="ib-alert-close"
+              aria-label="Dismiss"
+              onClick={() => setError(null)}
+            >
+              <CloseIcon />
+            </button>
+          </p>
+        )}
+        {isWhatsApp && windowMs <= 0 && (
+          <p className="ib-note">
+            The 24-hour window is closed, so WhatsApp may not deliver a free-form reply until the customer
+            writes again.
+          </p>
+        )}
         {config.quickReplies.length > 0 && (
-          <div className="ib-quick">
+          <fieldset className="ib-quick">
+            <legend className="ib-sr">Quick replies</legend>
             {config.quickReplies.map((q) => (
-              <button key={q.label} type="button" className="ib-chip" onClick={() => setDraft(q.text)}>
+              <button
+                key={q.label}
+                type="button"
+                className="ib-chip"
+                title={q.text}
+                onClick={() => {
+                  setDraft(q.text);
+                  input.current?.focus();
+                }}
+              >
                 {q.label}
               </button>
             ))}
-          </div>
+          </fieldset>
         )}
         <div className="ib-compose-row">
           <textarea
+            ref={input}
             className="ib-input"
-            rows={2}
-            placeholder={`Reply as ${config.teamLabel}…`}
+            rows={1}
+            placeholder={`Reply as ${config.teamLabel}`}
             aria-label="Reply"
             value={draft}
-            onInput={(e) => setDraft((e.target as HTMLTextAreaElement).value)}
+            onInput={(e) => {
+              const el = e.target as HTMLTextAreaElement;
+              setDraft(el.value);
+              el.style.height = 'auto';
+              el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+            }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              // Enter sends on a keyboard; on a phone it starts a new line and the button sends.
+              if (e.key === 'Enter' && !e.shiftKey && !isTouch()) {
                 e.preventDefault();
                 if (draft.trim()) void send(draft.trim());
               }
             }}
           />
-          <button type="submit" className="ib-send" disabled={!draft.trim() || busy !== null}>
-            {busy === 'send' ? 'Sending…' : 'Send'}
+          <button type="submit" className="ib-send" disabled={!draft.trim() || disabled}>
+            <SendIcon />
+            <span>{busy === 'send' ? 'Sending…' : 'Send'}</span>
           </button>
         </div>
       </form>
@@ -389,80 +703,179 @@ function Thread({
   );
 }
 
+/** Whether the AI answers this chat. Only your team changes it: Pause AI / Resume AI. */
+function AiStatus({
+  pausedUntil,
+  busy,
+  disabled,
+  onPause,
+}: {
+  pausedUntil: string | null;
+  busy: boolean;
+  disabled: boolean;
+  onPause: (hours: number | null) => void;
+}) {
+  if (pausedUntil) {
+    return (
+      <div className="ib-ai ib-ai--paused" role="status">
+        <span className="ib-ai-icon">
+          <PauseIcon />
+        </span>
+        <p className="ib-ai-text">
+          <strong>AI paused until {untilLabel(pausedUntil)}</strong>
+          <span>Customer messages are saved but not answered. You're handling this chat.</span>
+        </p>
+        <button
+          type="button"
+          className="ib-btn ib-btn--strong"
+          disabled={disabled}
+          onClick={() => onPause(null)}
+        >
+          <PlayIcon />
+          {busy ? 'Resuming…' : 'Resume AI'}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="ib-ai ib-ai--on" role="status">
+      <span className="ib-ai-dot" aria-hidden />
+      <p className="ib-ai-text">
+        <strong>AI is answering</strong>
+        <span className="ib-ai-hint">Pause it to talk to the customer yourself.</span>
+      </p>
+      <Menu
+        label="Pause AI"
+        button={
+          <>
+            <PauseIcon />
+            {busy ? 'Pausing…' : 'Pause AI'}
+          </>
+        }
+        buttonClass="ib-btn"
+        disabled={disabled}
+        align="end"
+        items={PAUSE_OPTIONS.map((o) => ({ label: o.label, onSelect: () => onPause(o.hours) }))}
+      />
+    </div>
+  );
+}
+
 function MessageRow({
   api,
   config,
   message: m,
-  previous,
+  continues,
 }: {
   api: InboxApi;
   config: InboxConfig;
   message: InboxMessage;
-  previous?: InboxMessage;
+  continues: boolean;
 }) {
-  const day = dayLabel(m.createdAt);
-  const separator =
-    !previous || dayLabel(previous.createdAt) !== day ? <p className="ib-day">{day}</p> : null;
   const d = m.data;
 
   if (m.role === 'system') {
+    const paused = Boolean(d?.pausedUntil) || (!(d && 'pausedUntil' in d) && /paus/i.test(m.text));
     return (
-      <>
-        {separator}
-        <p className="ib-event">
-          {d?.pausedUntil ? `AI paused until ${shortTime(d.pausedUntil)}` : m.text || 'AI resumed'} ·{' '}
-          {clock(m.createdAt)}
-        </p>
-      </>
+      <p className={`ib-event ib-event--${paused ? 'paused' : 'resumed'}`}>
+        {paused ? <PauseIcon /> : <PlayIcon />}
+        <span>
+          {d?.pausedUntil ? `AI paused until ${untilLabel(d.pausedUntil)}` : paused ? m.text : 'AI resumed'}
+        </span>
+        <time dateTime={m.createdAt}>{clock(m.createdAt)}</time>
+      </p>
     );
   }
 
-  if (m.role === 'tool' && d?.tool) {
-    return (
-      <>
-        {separator}
-        <details className={`ib-tool ${d.tool.isError ? 'ib-tool--error' : ''}`}>
-          <summary>
-            ⚙ {d.tool.name}
-            {d.tool.isError ? ' (failed)' : ''}
-          </summary>
-          <pre>{JSON.stringify(d.tool.input, null, 2)}</pre>
-          <pre>{prettyJson(d.tool.result)}</pre>
-        </details>
-      </>
-    );
-  }
-
-  const kind = m.role === 'user' ? 'customer' : d?.team ? 'team' : d?.context ? 'system' : 'ai';
-  const label = { customer: '', team: config.teamLabel, system: 'Sent by your app', ai: '🤖 AI' }[kind];
+  const kind = kindOf(m);
+  const label = {
+    customer: null,
+    team: { icon: <PersonIcon />, text: config.teamLabel },
+    app: { icon: <AppIcon />, text: 'Sent by your app' },
+    ai: { icon: <SparkIcon />, text: 'AI' },
+  }[kind];
   const media = d?.whatsapp?.media;
+  const text = shownText(m.text, Boolean(media));
 
   return (
-    <>
-      {separator}
-      <div className={`ib-msg ib-msg--${kind}`}>
-        <div className="ib-bubble">
-          {label && <p className="ib-msg-label">{label}</p>}
-          {media && <Media api={api} media={media} />}
-          {m.text && <p className="ib-msg-text">{formatText(m.text)}</p>}
-          {d?.cards && (
-            <ul className="ib-cards">
-              {d.cards.map((c) => (
-                <li key={c.id}>
-                  <a href={c.url} target="_blank" rel="noopener noreferrer">
-                    {c.title}
-                    {c.price !== undefined &&
-                      ` · ${typeof c.price === 'number' ? `${config.currency}${c.price}` : c.price}`}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-          {d?.whatsapp?.error && <p className="ib-msg-error">Not delivered: {d.whatsapp.error}</p>}
-          <p className="ib-msg-time">{clock(m.createdAt)}</p>
-        </div>
+    <div className={`ib-msg ib-msg--${kind}${continues ? ' ib-msg--cont' : ''}`}>
+      {label && !continues && (
+        <p className="ib-msg-label">
+          {label.icon}
+          {label.text}
+        </p>
+      )}
+      <div className="ib-bubble">
+        {media && <Media api={api} media={media} />}
+        {text && <p className="ib-msg-text">{formatText(text)}</p>}
+        {d?.cards && d.cards.length > 0 && (
+          <ul className="ib-cards">
+            {d.cards.map((c) => (
+              <li key={c.id}>
+                <a href={safeUrl(c.url)} target="_blank" rel="noopener noreferrer">
+                  {c.image && <img src={safeUrl(c.image)} alt="" loading="lazy" />}
+                  <span className="ib-card-title">{c.title}</span>
+                  {c.price !== undefined && (
+                    <span className="ib-card-price">
+                      {typeof c.price === 'number' ? `${config.currency}${c.price}` : c.price}
+                    </span>
+                  )}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {d?.login && <p className="ib-msg-meta">Showed the “Log in” button</p>}
+        {d?.whatsapp?.error && (
+          <p className="ib-msg-error">
+            <strong>Not delivered.</strong> {d.whatsapp.error}
+          </p>
+        )}
+        <p className="ib-msg-time">
+          {d?.voice && <span className="ib-msg-tag">Voice</span>}
+          <time dateTime={m.createdAt}>{clock(m.createdAt)}</time>
+        </p>
       </div>
-    </>
+    </div>
+  );
+}
+
+type ToolCall = {
+  id: string;
+  createdAt: string;
+  tool: NonNullable<NonNullable<InboxMessage['data']>['tool']>;
+};
+
+/** A run of tool calls between two messages, folded into one line. */
+function ToolGroup({ calls }: { calls: ToolCall[] }) {
+  const failed = calls.filter((c) => c.tool.isError).length;
+  const names = [...new Set(calls.map((c) => c.tool.name))];
+  return (
+    <details className={`ib-tools${failed ? ' ib-tools--error' : ''}`}>
+      <summary>
+        <ToolIcon />
+        <span className="ib-tools-summary">
+          {calls.length === 1 ? 'Used ' : `Used ${calls.length} tools: `}
+          <span className="ib-tools-names">{names.join(', ')}</span>
+        </span>
+        {failed > 0 && <span className="ib-tools-failed">{failed} failed</span>}
+      </summary>
+      <ol className="ib-tool-list">
+        {calls.map((c) => (
+          <li key={c.id} className={c.tool.isError ? 'ib-tool--error' : ''}>
+            <p className="ib-tool-name">
+              {c.tool.name}
+              {c.tool.isError && <span className="ib-tools-failed">failed</span>}
+              <time dateTime={c.createdAt}>{clock(c.createdAt)}</time>
+            </p>
+            <p className="ib-tool-label">Input</p>
+            <pre>{JSON.stringify(c.tool.input, null, 2)}</pre>
+            <p className="ib-tool-label">Result</p>
+            <pre>{prettyJson(c.tool.result)}</pre>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 
@@ -490,9 +903,14 @@ function Media({
     };
   }, [api, media.id]);
 
-  if (failed) return <p className="ib-msg-error">Media no longer available</p>;
-  if (!url) return <p className="ib-msg-label">Loading media…</p>;
-  if (media.mimeType.startsWith('image/')) return <img className="ib-img" src={url} alt="" />;
+  if (failed) return <p className="ib-media-missing">Media no longer available</p>;
+  if (!url) return <p className="ib-media-loading">Loading media…</p>;
+  if (media.mimeType.startsWith('image/'))
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="ib-img-link">
+        <img className="ib-img" src={url} alt="Sent in the chat" />
+      </a>
+    );
   // WhatsApp voice notes and videos come without captions.
   if (media.mimeType.startsWith('audio/'))
     return (
@@ -507,9 +925,127 @@ function Media({
       </video>
     );
   return (
-    <a href={url} download={media.filename ?? 'file'}>
+    <a className="ib-file" href={url} download={media.filename ?? 'file'}>
+      <FileIcon />
       {media.filename ?? 'Download file'}
     </a>
+  );
+}
+
+interface MenuItem {
+  label: string;
+  onSelect: () => void;
+  disabled?: boolean;
+  /** A checkbox item (aria-checked). */
+  checked?: boolean;
+}
+
+/** A button with a small popup menu; closes on Escape, outside clicks and picking an item. */
+function Menu({
+  label,
+  button,
+  buttonClass,
+  items,
+  disabled,
+  align = 'start',
+  className = '',
+}: {
+  label: string;
+  button: ReactNode;
+  buttonClass: string;
+  items: MenuItem[];
+  disabled?: boolean;
+  align?: 'start' | 'end';
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    list.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const outside = (e: Event) => {
+      if (wrap.current && !e.composedPath().includes(wrap.current)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      setOpen(false);
+      trigger.current?.focus();
+      return;
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const buttons = [...(list.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+    const root = list.current?.getRootNode() as Document | ShadowRoot | undefined;
+    const at = buttons.indexOf(root?.activeElement as HTMLButtonElement);
+    const next = buttons[(at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length];
+    next?.focus();
+  };
+
+  return (
+    <div className={`ib-menu-wrap ${className}`} ref={wrap}>
+      <button
+        ref={trigger}
+        type="button"
+        className={buttonClass}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {button}
+      </button>
+      {open && (
+        <div
+          ref={list}
+          className={`ib-menu ib-menu--${align}`}
+          role="menu"
+          aria-label={label}
+          onKeyDown={onKeyDown}
+        >
+          {items.map((item) =>
+            item.checked === undefined ? (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                className="ib-menu-item"
+                disabled={item.disabled}
+                onClick={() => {
+                  setOpen(false);
+                  item.onSelect();
+                }}
+              >
+                {item.label}
+              </button>
+            ) : (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={item.checked}
+                className="ib-menu-item"
+                disabled={item.disabled}
+                onClick={() => {
+                  setOpen(false);
+                  item.onSelect();
+                }}
+              >
+                <span className={`ib-check${item.checked ? ' ib-check--on' : ''}`} aria-hidden />
+                {item.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -525,13 +1061,53 @@ function Filter({
   return (
     <button
       type="button"
-      className={`ib-filter ${active ? 'ib-filter--on' : ''}`}
+      className={`ib-filter${active ? ' ib-filter--on' : ''}`}
       aria-pressed={active}
       onClick={onClick}
     >
       {children}
     </button>
   );
+}
+
+// ── Helpers ────────────────────────────────────────────
+
+type Item =
+  | { type: 'message'; id: string; createdAt: string; message: InboxMessage }
+  | { type: 'tools'; id: string; createdAt: string; calls: ToolCall[] };
+
+/** Messages in order, with each run of tool calls folded into one item. */
+function groupMessages(messages: InboxMessage[]): Item[] {
+  const items: Item[] = [];
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      if (!m.data?.tool) continue;
+      const call = { id: m.id, createdAt: m.createdAt, tool: m.data.tool };
+      const last = items.at(-1);
+      if (last?.type === 'tools') last.calls.push(call);
+      else items.push({ type: 'tools', id: m.id, createdAt: m.createdAt, calls: [call] });
+      continue;
+    }
+    items.push({ type: 'message', id: m.id, createdAt: m.createdAt, message: m });
+  }
+  return items;
+}
+
+type Kind = 'customer' | 'ai' | 'team' | 'app';
+
+function kindOf(m: InboxMessage): Kind {
+  if (m.role === 'user') return 'customer';
+  if (m.data?.team) return 'team';
+  if (m.data?.context) return 'app';
+  return 'ai';
+}
+
+/** Same sender within a few minutes: the label isn't repeated. */
+function continues(previous: Item | undefined, item: Item): boolean {
+  if (previous?.type !== 'message' || item.type !== 'message') return false;
+  if (previous.message.role === 'system' || item.message.role === 'system') return false;
+  const gap = new Date(item.createdAt).getTime() - new Date(previous.createdAt).getTime();
+  return kindOf(previous.message) === kindOf(item.message) && gap < 5 * 60_000;
 }
 
 function placeholderConversation(key: string): InboxConversation {
@@ -550,44 +1126,102 @@ function placeholderConversation(key: string): InboxConversation {
   };
 }
 
-export function displayName(c: Pick<InboxConversation, 'conversationId' | 'channel' | 'name'>): string {
+/** The customer's name, and their number or chat id when there is a name to show first. */
+function who(c: Pick<InboxConversation, 'conversationId' | 'channel' | 'name'>): {
+  name: string;
+  detail: string | null;
+} {
   const id = c.conversationId.slice(c.channel.length + 1);
   if (c.channel === 'whatsapp') {
-    const number = /^\d+$/.test(id) ? `+${id}` : 'WhatsApp user';
-    return c.name ? `${c.name} · ${number}` : number;
+    const number = /^\d+$/.test(id) ? `+${id}` : 'Number not shared';
+    return c.name ? { name: c.name, detail: number } : { name: number, detail: null };
   }
-  return c.channel === 'web' ? `Website visitor ${id.slice(0, 6)}` : c.conversationId;
+  if (c.channel === 'web') return { name: c.name ?? 'Website visitor', detail: `Chat ${id.slice(0, 8)}` };
+  return { name: c.name ?? c.conversationId, detail: null };
 }
 
-function initials(c: InboxConversation): string {
-  const words = (c.name ?? '').trim().split(/\s+/).filter(Boolean);
+export function displayName(c: Pick<InboxConversation, 'conversationId' | 'channel' | 'name'>): string {
+  const { name, detail } = who(c);
+  return detail ? `${name} (${detail})` : name;
+}
+
+function initials(c: InboxConversation): string | null {
+  const words = (c.name ?? '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   if (words.length)
     return words
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase())
       .join('');
-  return c.channel === 'whatsapp' ? 'WA' : 'W';
+  return null;
+}
+
+/**
+ * The text as the team reads it: without the "[Image]" / "[Voice note]" label when the media is
+ * shown right above, or the "[Automated System Message]" tag when the bubble already says who sent it.
+ */
+function shownText(text: string, hasMedia: boolean): string {
+  let t = text.replace(/^\[Automated System Message\]\s*/i, '');
+  if (hasMedia) t = t.replace(/^\[(Image|Voice note|Video|Document|Sticker)\]\s*/, '');
+  return t;
 }
 
 function channelLabel(channel: string): string {
   return channel === 'whatsapp' ? 'WhatsApp' : channel === 'web' ? 'Website' : channel;
 }
 
-function shortTime(iso: string): string {
-  if (!iso) return '';
-  const date = new Date(iso);
-  const sameDay = new Date().toDateString() === date.toDateString();
-  return sameDay
-    ? date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/** Days from today: 0 today, 1 yesterday, -1 tomorrow. */
+function daysAgo(date: Date): number {
+  return Math.round((startOfDay(new Date()) - startOfDay(date)) / DAY_MS);
 }
 
 function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function listTime(iso: string): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  const days = daysAgo(date);
+  if (days === 0) return clock(iso);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return date.toLocaleDateString(undefined, { weekday: 'short' });
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 function dayLabel(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  const date = new Date(iso);
+  const days = daysAgo(date);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
+
+/** "6:30 pm", "tomorrow 9:00 am" or "14 Nov, 9:00 am". */
+function untilLabel(iso: string): string {
+  const date = new Date(iso);
+  const days = daysAgo(date);
+  if (days === 0) return clock(iso);
+  if (days === -1) return `tomorrow ${clock(iso)}`;
+  return `${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}, ${clock(iso)}`;
+}
+
+function durationLeft(ms: number): string {
+  const hours = Math.floor(ms / HOUR_MS);
+  if (hours >= 1) return `${hours}h`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
 }
 
 /** Tool results are often JSON on one line; indented they can be read. */
@@ -596,5 +1230,30 @@ function prettyJson(text: string): string {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
     return text;
+  }
+}
+
+/** Only http(s) links; anything else (javascript:, data:) becomes a dead link. */
+function safeUrl(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : '#';
+}
+
+function isTouch(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+}
+
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Private mode or blocked storage: the choice lasts until reload.
   }
 }

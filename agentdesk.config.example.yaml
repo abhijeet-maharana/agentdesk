@@ -10,8 +10,10 @@ port: 8080
 # own WhatsApp log, is shared as it is (docs/storage.md).
 # storage:
 #   table: agentdesk_chats
-# Read the visitor's IP from X-Forwarded-For. Only behind your own reverse proxy.
+# Read the visitor's IP from your reverse proxy's header (the last address in it). Only behind
+# your own proxy. Behind Cloudflare, set ipHeader: cf-connecting-ip.
 trustProxy: false
+# ipHeader: x-forwarded-for
 
 agent:
   name: Sam
@@ -63,6 +65,9 @@ voice:
   model: gemini-3.8-live
   voice: Kore
   maxMinutes: 5
+  # Tools the voice agent may use (default: all). Its tool calls come through the visitor's
+  # browser, so leave out anything that must only run on the model's own judgment.
+  # tools: [search_products, order_status]
 
 # Errors to Sentry (optional): your project's DSN, or "${SENTRY_DSN}" to read it from the environment.
 # sentry:
@@ -100,6 +105,8 @@ inbox:
 limits:
   messagesPerConversation: { max: 20, perMinutes: 10 }
   messagesPerIp: { max: 60, perMinutes: 10 }
+  # All website visitors together: your daily budget for typed replies.
+  messagesPerDay: { max: 3000, perMinutes: 1440 }
   voiceCallsPerConversation: { max: 3, perMinutes: 60 }
   voiceCallsPerIp: { max: 6, perMinutes: 60 }
   voiceCallsPerDay: { max: 100, perMinutes: 1440 }

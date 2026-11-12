@@ -56,3 +56,18 @@ export async function eventually(check: () => boolean | Promise<boolean>, timeou
     await new Promise((r) => setTimeout(r, 10));
   }
 }
+
+/** A model that answers only once `release()` is called: for a reply still being written. */
+export function gatedModel(response: GenerateResult) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => {
+      await gate;
+      return response;
+    },
+  });
+  return { model, release };
+}

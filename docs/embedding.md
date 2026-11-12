@@ -82,3 +82,5 @@ A guest's hidden arguments are `""`, so tools that need a user must refuse an em
 - The page must be HTTPS (or localhost) for the microphone.
 - The widget loads its audio processors from `blob:` URLs and opens a WebSocket to `generativelanguage.googleapis.com`. If your site has a Content Security Policy, allow `worker-src blob:` (or `script-src blob:`) and `connect-src wss://generativelanguage.googleapis.com https://chat.example.com`.
 - Each call is capped at `voice.maxMinutes`, and `limits.voiceCallsPerDay` caps all visitors together: that's your voice budget.
+- Gemini's tool calls reach agentdesk through the visitor's browser, so a visitor could send any of them with any arguments. Only the call's own tools are accepted; set `voice.tools` to give calls just the tools that are safe for that (hidden arguments are still filled by agentdesk, as in typed chat).
+- The transcript is saved once, when the call ends. The agent reads its lines marked `[Voice call]` and is told they come from the browser, so it checks claims in them with its tools.

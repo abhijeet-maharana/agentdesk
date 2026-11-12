@@ -31,6 +31,9 @@ const VOICE_NOTES_IN_CONTEXT = 2;
 const IDENTITY_TTL_MS = 10 * 60_000;
 const BUBBLE_GAP_MS = 500;
 const MAX_CACHED = 500;
+// What Claude reads as a photo: these types, at most 5 MB once base64-encoded.
+const MODEL_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const MAX_MODEL_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4);
 
 export interface WhatsAppChatDeps {
   config: Config;
@@ -107,11 +110,14 @@ export class WhatsAppChat {
         continue;
       }
       const version = this.deps.state.nextVersion(key);
-      void this.reply(phone, { latest: message }, version).catch((error: unknown) =>
-        this.deps.alert(
-          'whatsapp-reply-crashed',
-          `WhatsApp reply crashed for ${key}: ${String(error)}`,
-          error,
+      this.deps.state.track(
+        key,
+        this.reply(phone, { latest: message }, version).catch((error: unknown) =>
+          this.deps.alert(
+            'whatsapp-reply-crashed',
+            `WhatsApp reply crashed for ${key}: ${String(error)}`,
+            error,
+          ),
         ),
       );
     }
@@ -123,8 +129,14 @@ export class WhatsAppChat {
     return this.deps.meta.downloadMedia(mediaId);
   }
 
-  /** A message from your team (admin API): sent on WhatsApp, then stored. */
+  /** Stops the reply the agent is writing in this chat (your team answered or paused it). */
+  cancelReply(conversationId: string): void {
+    this.deps.state.cancel(conversationId);
+  }
+
+  /** A message from your team (admin API): sent on WhatsApp, then stored. The agent's running reply is dropped. */
   async teamReply(conversationId: string, text: string): Promise<StoredMessage> {
+    this.cancelReply(conversationId);
     const phone = conversationId.slice(CHANNEL.length + 1);
     const id = await this.deps.meta.sendText(phone, text);
     return this.deps.store.add({
@@ -145,7 +157,12 @@ export class WhatsAppChat {
     if (await this.deps.store.pausedUntil(conversationId)) return;
     const phone = conversationId.slice(CHANNEL.length + 1);
     const version = this.deps.state.nextVersion(conversationId);
-    await this.reply(phone, { note }, version);
+    const run = this.reply(phone, { note }, version);
+    this.deps.state.track(
+      conversationId,
+      run.catch(() => {}),
+    );
+    await run;
   }
 
   private async reply(
@@ -337,19 +354,30 @@ export class WhatsAppChat {
     return messages;
   }
 
+  /**
+   * The photo attached for the model, or a note when it can't take it: a type or size Claude
+   * rejects would fail every reply for as long as the photo is among the newest ones.
+   */
   private async withImage(
     text: string,
     file: { id: string; mimeType: string },
-  ): Promise<Array<TextPart | ImagePart>> {
+  ): Promise<string | Array<TextPart | ImagePart>> {
+    const unreadable = (why: string) =>
+      `${text} (${why}; ask the customer to describe it or send a screenshot)`;
+    const viewable = (type: string) =>
+      MODEL_IMAGE_TYPES.includes(type.split(';')[0]?.trim().toLowerCase() ?? '');
+    if (!viewable(file.mimeType)) return unreadable(`a ${file.mimeType} image you can't view`);
     try {
       const { data, mimeType } = await this.deps.meta.downloadMedia(file.id);
+      if (!viewable(mimeType)) return unreadable(`a ${mimeType} image you can't view`);
+      if (data.byteLength > MAX_MODEL_IMAGE_BYTES) return unreadable('a photo too large for you to view');
       return [
         { type: 'text', text },
         { type: 'image', image: data, mediaType: mimeType },
       ];
     } catch (error) {
       this.deps.log.warn(`Photo ${file.id} could not be loaded: ${String(error)}`);
-      return [{ type: 'text', text: `${text} (the photo could not be loaded)` }];
+      return `${text} (the photo could not be loaded)`;
     }
   }
 
