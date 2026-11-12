@@ -67,6 +67,16 @@ function setup(responses: Parameters<typeof mockModel>[0], overrides: Record<str
 }
 
 describe('website chat API', () => {
+  it("doesn't reply while the team has paused the chat", async () => {
+    const { post, load, store, id } = setup([text('Hi!')]);
+    await store.setPausedUntil(`web:${id}`, new Date(Date.now() + 60_000));
+    expect((await post('/messages', { text: 'Hello?' })).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 20));
+    const snapshot = await load();
+    expect(snapshot.messages.map((m) => m.role)).toEqual(['user']);
+    expect(snapshot.busy).toBe(false);
+  });
+
   it('stores the message, replies in the background, and shows cards', async () => {
     const { post, load } = setup([toolCall('1', 'list_products', {}), text('Here are our mugs.')]);
     expect((await post('/messages', { text: 'Show me mugs' })).status).toBe(200);

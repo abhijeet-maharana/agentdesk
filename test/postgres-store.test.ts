@@ -63,4 +63,15 @@ describe.skipIf(!url)('PostgresStore', () => {
     expect(await store.deleteBefore(new Date('2000-01-02T00:00:00Z'))).toBeGreaterThanOrEqual(1);
     expect((await store.recent(c, 10)).map((m) => m.text)).toEqual(['Now']);
   });
+
+  it('pauses and resumes a conversation', async () => {
+    const c = `test:${randomUUID()}`;
+    expect(await store.pausedUntil(c)).toBeNull();
+    await store.setPausedUntil(c, new Date(Date.now() + 60_000));
+    expect(await store.pausedUntil(c)).toBeInstanceOf(Date);
+    await store.setPausedUntil(c, new Date(Date.now() - 1_000));
+    expect(await store.pausedUntil(c)).toBeNull(); // expired
+    await store.setPausedUntil(c, null);
+    expect(await store.pausedUntil(c)).toBeNull();
+  });
 });

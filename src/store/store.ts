@@ -84,5 +84,8 @@ export interface Store {
   conversations(limit: number): Promise<ConversationSummary[]>;
   /** Deletes messages created before `cutoff`; returns how many. */
   deleteBefore(cutoff: Date): Promise<number>;
+  /** Until when the agent stays quiet in this conversation (your team took over), or null. */
+  pausedUntil(conversationId: string): Promise<Date | null>;
+  setPausedUntil(conversationId: string, until: Date | null): Promise<void>;
   close(): Promise<void>;
 }

@@ -185,6 +185,31 @@ describe('parseWebhook', () => {
     });
   });
 
+  it('keeps a username customer by their user id and writes to them with it', async () => {
+    const [msg] = parseWebhook({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [{ id: 'w1', from_user_id: 'IN.1349120865', type: 'text', text: { body: 'hi' } }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(msg?.from).toBe('IN.1349120865');
+    const graph = fakeGraph();
+    const meta = new MetaClient({ phoneNumberId: '1', apiVersion: 'v22.0', token: 't' }, graph.fetchImpl);
+    await meta.sendText('IN.1349120865', 'hello');
+    expect(graph.sent[0]).toMatchObject({ recipient: 'IN.1349120865' });
+    expect(graph.sent[0]).not.toHaveProperty('to');
+    expect(customerNote('IN.1349120865', undefined, null)).toBe(
+      '[WhatsApp: number not shared (WhatsApp username).]',
+    );
+  });
+
   it('checks Meta signatures', () => {
     const sig = `sha256=${createHmac('sha256', 'x').update('body').digest('hex')}`;
     expect(verifySignature('body', sig, 'x')).toBe(true);
@@ -379,5 +404,30 @@ describe('WhatsApp channel', () => {
       ['user', 'hi', '2026-11-10T10:00:00Z', { imported: true }],
       ['assistant', 'Hello!', '2026-11-10T10:00:05Z', { imported: true }],
     ]);
+  });
+
+  it('stays quiet while the team has paused the chat, and answers again after resume', async () => {
+    const { app, whatsappChat, graph, rows } = setup([text('Back with you!')]);
+    const admin = { authorization: 'Bearer admin-token', 'content-type': 'application/json' };
+    const url = `/v1/admin/conversations/${whatsappKey(PHONE)}`;
+    const paused = await app.request(`${url}/pause`, {
+      method: 'POST',
+      headers: admin,
+      body: JSON.stringify({ hours: 12 }),
+    });
+    expect(paused.status).toBe(200);
+    expect(
+      ((await (await app.request(url, { headers: admin })).json()) as { pausedUntil: string | null })
+        .pausedUntil,
+    ).toBeTruthy();
+
+    await whatsappChat.receive(webhook({ type: 'text', text: { body: 'hello?' } }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(graph.sent).toHaveLength(0);
+    expect(await rows()).toHaveLength(1); // stored, not answered
+
+    await app.request(`${url}/pause`, { method: 'DELETE', headers: admin });
+    await whatsappChat.receive(webhook({ type: 'text', text: { body: 'anyone?' } }));
+    await eventually(() => graph.sent.length === 1);
   });
 });

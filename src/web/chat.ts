@@ -104,6 +104,8 @@ export class WebChat {
       text,
       data: identity ? { userId: identity.sub } : null,
     });
+    // Your team took over this chat: store the message, the agent stays quiet.
+    if (await this.deps.store.pausedUntil(key)) return;
     this.deps.state.setBusy(key, true);
     void this.reply(key, identity, version).catch((error: unknown) =>
       this.deps.log.error(`Reply crashed for ${key}: ${String(error)}`),

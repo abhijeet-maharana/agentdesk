@@ -10,7 +10,7 @@ export interface InboundMedia {
 export interface InboundMessage {
   /** Meta's message id (wamid), used to skip retries. */
   id: string;
-  /** The customer's number, digits only. */
+  /** The customer's number, digits only, or their business-scoped user id (BSUID). */
   from: string;
   /** Their WhatsApp profile name, when Meta sends it. */
   name?: string;
@@ -23,6 +23,8 @@ export interface InboundMessage {
 interface MetaMessage {
   id?: string;
   from?: string;
+  /** A business-scoped user id (e.g. "IN.1349…") for customers who share a username instead of their number. */
+  from_user_id?: string;
   type?: string;
   text?: { body?: string };
   image?: MetaMedia;
@@ -95,7 +97,7 @@ export function parseWebhook(payload: unknown): InboundMessage[] {
 }
 
 function parseMessage(m: MetaMessage): InboundMessage | null {
-  const from = (m.from ?? '').replace(/\D/g, '');
+  const from = customerId(m.from ?? m.from_user_id ?? '');
   if (!m.id || !from || !m.type) return null;
   const base = { id: m.id, from, type: m.type };
 
@@ -150,4 +152,14 @@ function parseMessage(m: MetaMessage): InboundMessage | null {
 
   // Reactions, unsupported and system messages: nothing for the agent to answer.
   return null;
+}
+
+/** True for a business-scoped user id ("IN.1349…", "IN.ENT.1181…") rather than a phone number. */
+export function isUserId(id: string): boolean {
+  return /^[A-Z]{2}\./.test(id);
+}
+
+/** A phone number as digits only; a business-scoped user id as is. */
+function customerId(raw: string): string {
+  return isUserId(raw) ? raw : raw.replace(/\D/g, '');
 }

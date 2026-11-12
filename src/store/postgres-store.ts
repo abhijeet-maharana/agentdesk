@@ -46,6 +46,13 @@ export class PostgresStore implements Store {
     // Row level security with no policies: only the table's owner (agentdesk) can read it. Harmless on
     // plain Postgres; on Supabase it keeps chats out of the public REST API.
     await this.sql`alter table agentdesk_messages enable row level security`;
+    // Per-conversation settings: for now, when your team has paused the agent.
+    await this.sql`
+      create table if not exists agentdesk_conversations (
+        conversation_id text primary key,
+        paused_until timestamptz
+      )`;
+    await this.sql`alter table agentdesk_conversations enable row level security`;
   }
 
   async add(message: NewMessage): Promise<StoredMessage> {
@@ -104,6 +111,20 @@ export class PostgresStore implements Store {
   async deleteBefore(cutoff: Date): Promise<number> {
     const result = await this.sql`delete from agentdesk_messages where created_at < ${cutoff}`;
     return result.count;
+  }
+
+  async pausedUntil(conversationId: string): Promise<Date | null> {
+    const [row] = await this.sql<{ paused_until: Date | null }[]>`
+      select paused_until from agentdesk_conversations
+      where conversation_id = ${conversationId} and paused_until > now()`;
+    return row?.paused_until ?? null;
+  }
+
+  async setPausedUntil(conversationId: string, until: Date | null): Promise<void> {
+    await this.sql`
+      insert into agentdesk_conversations (conversation_id, paused_until)
+      values (${conversationId}, ${until})
+      on conflict (conversation_id) do update set paused_until = excluded.paused_until`;
   }
 
   async close(): Promise<void> {

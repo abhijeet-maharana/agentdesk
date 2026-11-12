@@ -11,7 +11,7 @@ import type { ChatState } from '../state.js';
 import type { Card, Store, StoredMessage } from '../store/store.js';
 import type { Audio } from './audio.js';
 import type { MetaClient } from './meta.js';
-import { type InboundMessage, parseWebhook } from './parse.js';
+import { type InboundMessage, isUserId, parseWebhook } from './parse.js';
 
 export const CHANNEL = 'whatsapp';
 export const whatsappKey = (phone: string) => `${CHANNEL}:${phone}`;
@@ -79,6 +79,8 @@ export class WhatsAppChat {
 
     for (const [phone, message] of latest) {
       const key = whatsappKey(phone);
+      // Your team took over this chat: stored above, the agent stays quiet.
+      if (await this.deps.store.pausedUntil(key)) continue;
       if (!this.deps.state.take(`wa-replies:${key}`, this.deps.config.limits.repliesPerWhatsAppNumber)) {
         this.deps.log.warn(`${key} is over its reply limit; message stored, not answered`);
         continue;
@@ -110,6 +112,7 @@ export class WhatsAppChat {
    * sent nor stored. Inside WhatsApp's 24-hour window only, which Meta enforces.
    */
   async nudge(conversationId: string, note: string): Promise<void> {
+    if (await this.deps.store.pausedUntil(conversationId)) return;
     const phone = conversationId.slice(CHANNEL.length + 1);
     const version = this.deps.state.nextVersion(conversationId);
     await this.reply(phone, { note }, version);
@@ -380,7 +383,8 @@ export class WhatsAppChat {
 
 /** One line the agent reads with the customer's latest message (not stored). */
 export function customerNote(phone: string, name: string | undefined, identity: Identity | null): string {
-  const who = [`+${phone}`, name && `profile name "${name}"`].filter(Boolean).join(', ');
+  const number = isUserId(phone) ? 'number not shared (WhatsApp username)' : `+${phone}`;
+  const who = [number, name && `profile name "${name}"`].filter(Boolean).join(', ');
   if (!identity) return `[WhatsApp: ${who}.]`;
   return `[WhatsApp: ${who}. Known customer${identity.name ? ` ${identity.name}` : ''}.${identity.note ? ` ${identity.note}` : ''}]`;
 }

@@ -9,7 +9,7 @@ The same agent, prompt and tools as the website chat, on your WhatsApp Business 
 - Splits a reply into separate messages on `---` lines.
 - Sends tool cards as a catalog message (`whatsapp.catalog`), or as photos with a caption and link.
 - Replies with a voice note to a voice note (or when asked), when `whatsapp.audio.speechModel` is set.
-- Your team reads the chats and replies through the admin API, as for the website.
+- Your team reads the chats and replies through the admin API, as for the website, and can pause the agent in one chat while they talk to the customer (`POST /v1/admin/conversations/:key/pause`).
 
 ## Set up
 

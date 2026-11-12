@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { isUserId } from './parse.js';
 
 const GRAPH = 'https://graph.facebook.com';
 const TIMEOUT_MS = 15_000;
@@ -135,7 +136,9 @@ export class MetaClient {
   }
 
   private async send(to: string, message: Record<string, unknown>): Promise<string> {
-    const body = await this.post('messages', { messaging_product: 'whatsapp', to, ...message });
+    // Customers who share a username instead of their number are addressed by their user id.
+    const recipient = isUserId(to) ? { recipient: to } : { to };
+    const body = await this.post('messages', { messaging_product: 'whatsapp', ...recipient, ...message });
     return (body as { messages?: Array<{ id: string }> }).messages?.[0]?.id ?? '';
   }
 

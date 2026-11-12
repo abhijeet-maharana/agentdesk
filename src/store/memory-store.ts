@@ -3,6 +3,7 @@ import type { ConversationSummary, NewMessage, Store, StoredMessage } from './st
 /** Keeps chats in memory: for trying agentdesk out and for tests. Everything is lost on restart. */
 export class MemoryStore implements Store {
   private rows: StoredMessage[] = [];
+  private pauses = new Map<string, Date>();
   private nextId = 1;
 
   async init(): Promise<void> {}
@@ -49,6 +50,16 @@ export class MemoryStore implements Store {
     const before = this.rows.length;
     this.rows = this.rows.filter((r) => new Date(r.createdAt) >= cutoff);
     return before - this.rows.length;
+  }
+
+  async pausedUntil(conversationId: string): Promise<Date | null> {
+    const until = this.pauses.get(conversationId);
+    return until && until > new Date() ? until : null;
+  }
+
+  async setPausedUntil(conversationId: string, until: Date | null): Promise<void> {
+    if (until) this.pauses.set(conversationId, until);
+    else this.pauses.delete(conversationId);
   }
 
   async close(): Promise<void> {}

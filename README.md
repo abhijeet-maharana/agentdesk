@@ -109,9 +109,10 @@ Set `retentionDays` in the config to delete old chats daily. Put it behind your 
 | Call | Does |
 |---|---|
 | `GET /v1/admin/conversations?limit=50` | Latest chats |
-| `GET /v1/admin/conversations/:key` | One chat, with every tool call and its raw result |
+| `GET /v1/admin/conversations/:key` | One chat, with every tool call and its raw result, and `pausedUntil` |
 | `POST /v1/admin/conversations/:key/messages` `{ "text": "..." }` | Reply as your team (shown with `teamLabel`; sent on WhatsApp for `whatsapp:` chats) |
 | `POST /v1/admin/conversations/:key/context` `{ "text": "...", "ref"?: "..." }` | Something your app sent the customer itself; the agent reads it, nothing is sent |
+| `POST /v1/admin/conversations/:key/pause` `{ "hours": 12 }` / `DELETE …/pause` | Your team takes over: the agent stays quiet in that chat (messages are still stored) until then, or until resumed |
 | `POST /v1/admin/conversations/:key/import` `{ "messages": [{ "role", "text", "createdAt" }] }` | Earlier history from your own records, into an empty conversation only (409 otherwise) |
 | `POST /v1/admin/conversations/:key/nudge` `{ "note": "..." }` | The agent writes to a WhatsApp customer now; the note says why and is never sent |
 | `POST /v1/admin/whatsapp/webhook` | Pass on a Meta webhook body your own app received ([docs/whatsapp.md](docs/whatsapp.md)) |

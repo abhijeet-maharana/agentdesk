@@ -44,6 +44,12 @@ const importBody = z.object({
     .min(1)
     .max(200),
 });
+const pauseBody = z.object({
+  hours: z
+    .number()
+    .positive()
+    .max(24 * 30),
+});
 const nudgeBody = z.object({ note: z.string().trim().min(1).max(2000) });
 const contextBody = z.object({
   text: z.string().trim().min(1).max(4000),
@@ -187,7 +193,12 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.get('/v1/admin/conversations/:key', async (c) => {
     const limit = z.coerce.number().int().min(1).max(1000).default(200).parse(c.req.query('limit'));
-    return c.json({ messages: await store.recent(c.req.param('key'), limit, { includeTools: true }) });
+    const key = c.req.param('key');
+    const [messages, pausedUntil] = await Promise.all([
+      store.recent(key, limit, { includeTools: true }),
+      store.pausedUntil(key),
+    ]);
+    return c.json({ messages, pausedUntil: pausedUntil?.toISOString() ?? null });
   });
 
   app.post('/v1/admin/conversations/:key/messages', async (c) => {
@@ -239,6 +250,20 @@ export function createApp(deps: ServerDeps): Hono {
       });
     }
     return c.json({ imported: messages.length });
+  });
+
+  /** Your team takes over: the agent stays quiet in this chat for `hours` (messages are still stored). */
+  app.post('/v1/admin/conversations/:key/pause', async (c) => {
+    const { hours } = pauseBody.parse(await c.req.json());
+    const until = new Date(Date.now() + hours * 60 * 60_000);
+    await store.setPausedUntil(c.req.param('key'), until);
+    return c.json({ pausedUntil: until.toISOString() });
+  });
+
+  /** The agent answers this chat again (from the customer's next message). */
+  app.delete('/v1/admin/conversations/:key/pause', async (c) => {
+    await store.setPausedUntil(c.req.param('key'), null);
+    return c.json({ pausedUntil: null });
   });
 
   /** The agent writes to a WhatsApp customer now; `note` says why (not sent, not stored). Runs in the background. */
