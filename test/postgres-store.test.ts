@@ -132,6 +132,10 @@ describe.skipIf(!url)('PostgresStore on an app table it shares', () => {
     ]);
     expect(await list({ channel: 'whatsapp' })).toEqual([['whatsapp:919876543210', 'whatsapp', 1, false]]);
     expect(await list({ search: 'pune' })).toEqual([['web:abc', 'web', 1, false]]);
+    // A number finds its chat with or without the country code, spaces, + or dashes.
+    for (const search of ['9876543210', '98765 43210', '+91 98765-43210', '+919876543210']) {
+      expect(await list({ search })).toEqual([['whatsapp:919876543210', 'whatsapp', 1, false]]);
+    }
 
     await store.markRead('web:abc');
     await store.setStarred('whatsapp:919876543210', true);

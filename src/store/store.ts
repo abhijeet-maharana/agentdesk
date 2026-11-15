@@ -92,10 +92,20 @@ export interface ConversationQuery {
   limit: number;
   /** Only conversations whose latest message is older than this (paging). */
   before?: string;
-  /** In the conversation id or any message text, case-insensitive. */
+  /** In the conversation id, the customer's name or any message text, case-insensitive. */
   search?: string;
   starredOnly?: boolean;
   channel?: string;
+}
+
+/**
+ * The digits of a search that looks like a phone number, e.g. `+91 98765-43210` → `919876543210`,
+ * so it matches the bare digits a WhatsApp chat is stored under. Null for any other search.
+ */
+export function phoneDigits(search: string): string | null {
+  if (!/^[\d\s+\-().]+$/.test(search)) return null;
+  const digits = search.replace(/\D/g, '');
+  return digits || null;
 }
 
 /** Where chats are kept: Postgres in production, memory for a quick try. */

@@ -91,6 +91,10 @@ describe('inbox API', () => {
       ['web:a', 1, null],
     ]);
     expect((await list('?search=mug')).map((c) => c.conversationId)).toEqual(['web:a']);
+    expect((await list('?search=asha')).map((c) => c.conversationId)).toEqual(['whatsapp:91']);
+    expect((await list(`?search=${encodeURIComponent('+91')}`)).map((c) => c.conversationId)).toEqual([
+      'whatsapp:91',
+    ]);
     expect((await list('?channel=whatsapp')).map((c) => c.conversationId)).toEqual(['whatsapp:91']);
 
     await call('/conversations/web%3Aa/read', 'admin-token', { method: 'POST', body: '{}' });

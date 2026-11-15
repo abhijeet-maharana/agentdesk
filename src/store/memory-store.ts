@@ -1,4 +1,11 @@
-import type { ConversationQuery, ConversationSummary, NewMessage, Store, StoredMessage } from './store.js';
+import {
+  type ConversationQuery,
+  type ConversationSummary,
+  type NewMessage,
+  phoneDigits,
+  type Store,
+  type StoredMessage,
+} from './store.js';
 
 /** Keeps chats in memory: for trying agentdesk out and for tests. Everything is lost on restart. */
 export class MemoryStore implements Store {
@@ -34,6 +41,7 @@ export class MemoryStore implements Store {
 
   async conversations(query: ConversationQuery): Promise<ConversationSummary[]> {
     const search = query.search?.toLowerCase();
+    const digits = query.search ? phoneDigits(query.search) : null;
     const byId = new Map<string, StoredMessage[]>();
     for (const row of this.rows) {
       if (row.role !== 'user' && row.role !== 'assistant') continue;
@@ -49,7 +57,11 @@ export class MemoryStore implements Store {
       if (
         search &&
         !id.toLowerCase().includes(search) &&
-        !rows.some((r) => r.text.toLowerCase().includes(search))
+        !(digits && id.includes(digits)) &&
+        !rows.some(
+          (r) =>
+            r.text.toLowerCase().includes(search) || r.data?.whatsapp?.name?.toLowerCase().includes(search),
+        )
       )
         continue;
       const customer = rows.filter((r) => r.role === 'user');

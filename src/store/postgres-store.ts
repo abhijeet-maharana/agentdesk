@@ -5,6 +5,7 @@ import {
   type ConversationSummary,
   DuplicateMessageError,
   type NewMessage,
+  phoneDigits,
   type Store,
   type StoredMessage,
 } from './store.js';
@@ -86,6 +87,7 @@ export class PostgresStore implements Store {
     const { sql } = this;
     const t = sql(this.table);
     const search = query.search ? `%${query.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+    const digits = query.search ? phoneDigits(query.search) : null;
     const rows = await sql<
       {
         phone_number: string;
@@ -120,8 +122,11 @@ export class PostgresStore implements Store {
           }
           ${
             search
-              ? sql`and (l.phone_number ilike ${search} or exists (
-                  select 1 from ${t} x where x.phone_number = l.phone_number and x.message ilike ${search}))`
+              ? sql`and (l.phone_number ilike ${search}
+                  ${digits ? sql`or l.phone_number like ${`%${digits}%`}` : sql``}
+                  or exists (
+                    select 1 from ${t} x where x.phone_number = l.phone_number
+                      and (x.message ilike ${search} or x.metadata->>'profile_name' ilike ${search})))`
               : sql``
           }
         order by l.created_at desc
