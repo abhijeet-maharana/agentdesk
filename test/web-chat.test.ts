@@ -286,7 +286,10 @@ describe('hardening', () => {
     expect((await post('/messages', { text: 'Thanks', page: 'javascript:alert(1)' })).status).toBe(200);
     await eventually(async () => (await load()).messages.length === 4);
     const rows = await store.recent(`web:${id}`, 10);
-    expect(rows.filter((r) => r.role === 'user').map((r) => r.data?.page)).toEqual(['/products/car-tag', undefined]);
+    expect(rows.filter((r) => r.role === 'user').map((r) => r.data?.page)).toEqual([
+      '/products/car-tag',
+      undefined,
+    ]);
   });
 
   it('tells the agent which lines came from a call transcript', async () => {
