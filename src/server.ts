@@ -20,7 +20,16 @@ import { MetaError, verifySignature } from './whatsapp/meta.js';
 const conversationId = z.string().uuid();
 const sessionId = z.string().uuid();
 
-const sendBody = z.object({ text: z.string().trim().min(1).max(1000) });
+const sendBody = z.object({
+  text: z.string().trim().min(1).max(1000),
+  // The page path the visitor sent the message from (widget: location.pathname); dropped when odd.
+  page: z
+    .string()
+    .max(200)
+    .regex(/^\/[^\s]*$/)
+    .optional()
+    .catch(undefined),
+});
 const voiceToolBody = z.object({
   name: z.string().min(1).max(64),
   args: z.record(z.string(), z.unknown()).default({}),
@@ -155,8 +164,8 @@ export function createApp(deps: ServerDeps): Hono {
 
   app.post('/v1/web/conversations/:id/messages', async (c) => {
     const id = conversationId.parse(c.req.param('id'));
-    const { text } = sendBody.parse(await c.req.json());
-    await chat.send(id, text, await identityOf(c), ipOf(c));
+    const { text, page } = sendBody.parse(await c.req.json());
+    await chat.send(id, text, await identityOf(c), ipOf(c), page);
     return c.json({ ok: true });
   });
 

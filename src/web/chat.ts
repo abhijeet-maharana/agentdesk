@@ -3,7 +3,7 @@ import type { LanguageModel, ModelMessage } from 'ai';
 import { answer, UNAVAILABLE_REPLY } from '../agent/answer.js';
 import type { AgentLoopParams } from '../agent/loop.js';
 import type { McpTools } from '../agent/mcp.js';
-import { basePrompt, recentTurnsNote, voiceCallNote, webChatNote } from '../agent/prompt.js';
+import { basePrompt, pageNote, recentTurnsNote, voiceCallNote, webChatNote } from '../agent/prompt.js';
 import { isOnHosts, type ToolRunner } from '../agent/tools.js';
 import type { Config, Limit, Secrets } from '../config.js';
 import { type Identity, identityNote } from '../identity.js';
@@ -91,7 +91,7 @@ export class WebChat {
   }
 
   /** Stores the visitor's message and starts the agent; returns at once (a reply can take 10–40 s). */
-  async send(id: string, text: string, identity: Identity | null, ip: string): Promise<void> {
+  async send(id: string, text: string, identity: Identity | null, ip: string, page?: string): Promise<void> {
     const { limits } = this.deps.config;
     const key = conversationKey(id);
     this.enforce(
@@ -109,7 +109,10 @@ export class WebChat {
       channel: CHANNEL,
       role: 'user',
       text,
-      data: identity ? { userId: identity.sub } : null,
+      data:
+        identity || page
+          ? { ...(identity ? { userId: identity.sub } : {}), ...(page ? { page } : {}) }
+          : null,
     });
     // Your team took over this chat: store the message, the agent stays quiet.
     if (await this.deps.store.pausedUntil(key)) return;
@@ -254,7 +257,8 @@ export class WebChat {
       const messages = toModelMessages(history);
       const last = messages.at(-1);
       if (last?.role !== 'user') return; // nothing new to answer
-      last.content = `${identityNote(identity)}\n${last.content as string}`;
+      const page = history.findLast((row) => row.role === 'user')?.data?.page;
+      last.content = `${identityNote(identity)}${page ? `\n${pageNote(page)}` : ''}\n${last.content as string}`;
 
       const reply = await answer(this.deps, {
         instructions,

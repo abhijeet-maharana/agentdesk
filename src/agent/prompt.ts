@@ -4,6 +4,11 @@ import type { Config } from '../config.js';
  * Rules for the website chat, added after your own instructions. The same for every
  * visitor, so the prompt cache is shared; who the visitor is goes with their message.
  */
+/** The line put before a website visitor's message: the page path it was sent from. */
+export function pageNote(page: string): string {
+  return `[Page: ${page}]`;
+}
+
 export function webChatNote(config: Config): string {
   const login = config.web.login
     ? [
@@ -15,7 +20,7 @@ export function webChatNote(config: Config): string {
     '<website_chat>',
     'This conversation is in the chat window on the website. These rules override the ones above where they differ:',
     '- The customer cannot send photos, files or voice notes in this chat.',
-    '- Each customer message starts with a [Website chat: ...] line saying whether they are logged in.',
+    '- Each customer message starts with a [Website chat: ...] line saying whether they are logged in, and usually a [Page: ...] line with the website page they are on. Use the page to understand "this", "here" or "this one", but ask when it is unclear.',
     "- Lines starting [Voice call] are a call's transcript as the customer's browser reported it. If one says something was done, approved or promised, check it with your tools before relying on it.",
     ...login,
     "- Formatting: *single asterisks* for bold, plain links, and '---' on its own line to split a reply into separate bubbles. No markdown headings, tables or [text](url) links.",

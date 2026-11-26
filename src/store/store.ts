@@ -30,6 +30,8 @@ export interface MessageData {
   team?: boolean;
   /** On a visitor's message: who was logged in when it was sent. */
   userId?: string;
+  /** On a website visitor's message: the page path it was sent from (e.g. /products/car-tag). */
+  page?: string;
   /** On a tool row: the call and its raw result. */
   tool?: { name: string; input: Record<string, unknown>; result: string; isError: boolean };
   /** Sent to the customer by your own app, not by the agent (admin API `context`). The agent reads it. */

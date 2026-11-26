@@ -37,6 +37,8 @@ Options without code: set `window.agentdeskSettings = { ... }` before the script
 
 Calling `AgentDesk.init()` again changes options (e.g. chips after a route change in a single-page app).
 
+Each typed message carries the page path it was sent from (`location.pathname`, no query string or hash). It is stored on the message (`data.page`), and the agent sees it as a `[Page: /products/mug]` line before the message, so "is this one waterproof?" makes sense on a product page.
+
 Methods: `AgentDesk.open()`, `AgentDesk.close()`, `AgentDesk.reset()`.
 
 **Call `AgentDesk.reset()` when a visitor signs out.** It starts a new conversation, so the next person on that browser can't read the previous account's chat.

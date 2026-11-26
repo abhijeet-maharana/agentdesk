@@ -276,6 +276,19 @@ describe('hardening', () => {
     expect((await post(`/voice/${call.sessionId}/transcript`, turns)).status).toBe(403);
   });
 
+  it('tells the agent which page the visitor wrote from, and drops an odd page value', async () => {
+    const model = mockModel([text('That one is waterproof.'), text('Sure.')]);
+    const { post, chat, load, store, id } = setup([]);
+    useModel(chat, model);
+    await post('/messages', { text: 'Is this one waterproof?', page: '/products/car-tag' });
+    await eventually(async () => (await load()).messages.length === 2);
+    expect(JSON.stringify(model.doGenerateCalls[0]?.prompt)).toContain('[Page: /products/car-tag]');
+    expect((await post('/messages', { text: 'Thanks', page: 'javascript:alert(1)' })).status).toBe(200);
+    await eventually(async () => (await load()).messages.length === 4);
+    const rows = await store.recent(`web:${id}`, 10);
+    expect(rows.filter((r) => r.role === 'user').map((r) => r.data?.page)).toEqual(['/products/car-tag', undefined]);
+  });
+
   it('tells the agent which lines came from a call transcript', async () => {
     const model = mockModel([text('Let me check that.')]);
     const { post, chat, load } = setup([]);

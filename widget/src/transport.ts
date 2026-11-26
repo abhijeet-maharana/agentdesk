@@ -52,7 +52,8 @@ export function createTransport(
   return {
     load: () => request<ChatSnapshot>(base, { method: 'GET' }, identity),
     send: async (text) => {
-      await post('/messages', { text });
+      // The page path (no query or hash), so the agent knows what the visitor is looking at.
+      await post('/messages', { text, page: location.pathname });
     },
     voice: {
       start: () => post<VoiceStart>('/voice', {}),
